@@ -11,3 +11,4 @@ resend
 jinja2
 python-multipart
 tradingview-screener
+pandas-ta
