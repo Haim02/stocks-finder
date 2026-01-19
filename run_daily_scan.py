@@ -218,3 +218,8 @@ def run_scan():
     finally:
         db.close()
         print("\n✅ Scan complete.")
+
+
+if __name__ == "__main__":
+    print("Script run")
+    run_scan()

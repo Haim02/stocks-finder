@@ -24,13 +24,24 @@ from run_daily_scan import run_scan
 app = FastAPI()
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
+# @app.get("/trigger")
+# async def trigger_scan(background_tasks: BackgroundTasks, x_secret: str = Header(None)):
+#     # בדיקת אבטחה
+#     if x_secret != WEBHOOK_SECRET:
+#         raise HTTPException(status_code=401, detail="Unauthorized")
+
+#     # הפעלה ברקע (מונע Timeout)
+#     background_tasks.add_task(run_scan)
+
+#     return {"status": "started", "message": "The scan is running in the background. You will get an email soon."}
+
 @app.get("/trigger")
-async def trigger_scan(background_tasks: BackgroundTasks, x_secret: str = Header(None)):
-    # בדיקת אבטחה
-    if x_secret != WEBHOOK_SECRET:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+async def trigger(background_tasks: BackgroundTasks, x_secret: str = Header(None, alias="X-Secret")):
+    # הדפסה ללוגים כדי שנדע מה הגיע
+    print(f"Received secret: {x_secret}")
 
-    # הפעלה ברקע (מונע Timeout)
+    if x_secret != os.getenv("WEBHOOK_SECRET"):
+        raise HTTPException(status_code=401, detail="Invalid Secret")
+
     background_tasks.add_task(run_scan)
-
-    return {"status": "started", "message": "The scan is running in the background. You will get an email soon."}
+    return {"status": "success"}
