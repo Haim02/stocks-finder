@@ -1,5 +1,7 @@
 fastapi
 uvicorn
+python-dotenv
+finnhub-python
 pydantic-settings
 sqlalchemy
 psycopg2-binary
