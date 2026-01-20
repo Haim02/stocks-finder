@@ -22,7 +22,7 @@ import os
 from run_daily_scan import run_scan
 
 app = FastAPI()
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
+# WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
 # @app.get("/trigger")
 # async def trigger_scan(background_tasks: BackgroundTasks, x_secret: str = Header(None)):
@@ -35,7 +35,6 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
 #     return {"status": "started", "message": "The scan is running in the background. You will get an email soon."}
 
-@app.get("/trigger")
 @app.get("/trigger")
 async def trigger(background_tasks: BackgroundTasks):
     # ביטלנו זמנית את בדיקת ה-Header כדי לוודא שהכל עובד
