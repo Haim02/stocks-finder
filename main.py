@@ -35,34 +35,26 @@
 #     background_tasks.add_task(run_scan)
 #     return {"status": "success"}
 
+
 from fastapi import FastAPI, BackgroundTasks
 import os
-import sys
-
-# נסיון ייבוא עם הדפסת שגיאה אם נכשל
-try:
-    from run_daily_scan import run_scan
-except Exception as e:
-    print(f"IMPORT ERROR: Could not find run_daily_scan. Error: {e}")
-    run_scan = None
+import traceback
+from run_daily_scan import run_scan
 
 app = FastAPI()
 
 @app.get("/trigger")
 async def trigger(background_tasks: BackgroundTasks):
-    print("--- Trigger Received ---")
+    print("--- ה-Trigger התקבל בהצלחה ---")
 
-    if run_scan is None:
-        return {"status": "error", "message": "run_scan function not found in imports"}
-
-    # הפעלה בטוחה עם לוגים
     def wrapper():
         try:
-            print("Background task is actually starting now...")
+            print("מנסה להריץ את הסריקה ברקע...")
             run_scan()
-            print("Background task finished successfully!")
+            print("הסריקה הסתיימה בהצלחה!")
         except Exception as e:
-            print(f"CRITICAL ERROR DURING SCAN: {e}")
+            print("!!! שגיאה קריטית בזמן הסריקה !!!")
+            print(traceback.format_exc()) # זה ידפיס ל-Render את השגיאה המדויקת
 
     background_tasks.add_task(wrapper)
-    return {"status": "success", "message": "Task added to background"}
+    return {"status": "started"}
