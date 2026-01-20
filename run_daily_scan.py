@@ -144,6 +144,7 @@ def run_scan():
 
     try:
         potential_stocks = ScreenerService.get_candidates()
+        potential_stocks = ["NVDA"]
         if not potential_stocks:
             print("❌ No candidates found.")
             return
