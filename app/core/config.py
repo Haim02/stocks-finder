@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # FINNHUB_API_KEY: str
     RESEND_API_KEY: str
     DATABASE_URL: str
-    WEBHOOK_SECRET: str = "optional_secret"
+    WEBHOOK_SECRET: str ="optional_secret"
 
     # Email Settings
     ALERT_TO_EMAIL: str

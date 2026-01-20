@@ -36,12 +36,20 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 #     return {"status": "started", "message": "The scan is running in the background. You will get an email soon."}
 
 @app.get("/trigger")
-async def trigger(background_tasks: BackgroundTasks, x_secret: str = Header(None, alias="X-Secret")):
-    # הדפסה ללוגים כדי שנדע מה הגיע
-    print(f"Received secret: {x_secret}")
-
-    if x_secret != os.getenv("WEBHOOK_SECRET"):
-        raise HTTPException(status_code=401, detail="Invalid Secret")
-
+@app.get("/trigger")
+async def trigger(background_tasks: BackgroundTasks):
+    # ביטלנו זמנית את בדיקת ה-Header כדי לוודא שהכל עובד
+    print("Trigger received! Starting background scan...")
     background_tasks.add_task(run_scan)
-    return {"status": "success"}
+    return {"status": "success", "message": "Scan started successfully!"}
+
+
+# async def trigger(background_tasks: BackgroundTasks, x_secret: str = Header(None, alias="X-Secret")):
+#     # הדפסה ללוגים כדי שנדע מה הגיע
+#     print(f"Received secret: {x_secret}")
+
+#     if x_secret != os.getenv("WEBHOOK_SECRET"):
+#         raise HTTPException(status_code=401, detail="Invalid Secret")
+
+#     background_tasks.add_task(run_scan)
+#     return {"status": "success"}
