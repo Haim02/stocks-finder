@@ -138,6 +138,165 @@ class TAEngine:
 
 
 
+# import pandas as pd
+# import pandas_ta as ta
+
+# class TAEngine:
+#     def __init__(self, ticker, df):
+#         self.ticker = ticker
+#         self.df = df
+
+#     def analyze(self):
+#         df = self.df
+#         if df is None or len(df) < 50:
+#             return None
+
+#         df.columns = [col.lower() for col in df.columns]
+
+#         # --- חישוב אינדיקטורים (זהה ל-Pinescript) ---
+#         df['ma20'] = ta.sma(df['close'], length=20)
+#         df['ma50'] = ta.sma(df['close'], length=50)
+#         df['rsi'] = ta.rsi(df['close'], length=14)
+
+#         # ווליום וממוצע ווליום (10 ימים)
+#         df['avg_vol_10'] = ta.sma(df['volume'], length=10)
+
+#         # נתונים לנר הנוכחי ולנר הקודם
+#         last = df.iloc[-1]
+#         prev = df.iloc[-2]
+
+#         # ווליום יחסי
+#         rel_vol = last['volume'] / last['avg_vol_10'] if last['avg_vol_10'] > 0 else 0
+
+#         # --- לוגיקת האסטרטגיה (Swing Webhook logic) ---
+#         reasons = []
+#         score = 0
+
+#         # 1. Trend UP (Price > MA50 and MA20 > MA50)
+#         is_trend_up = last['close'] > last['ma50'] and last['ma20'] > last['ma50']
+#         if is_trend_up:
+#             score += 1
+#             reasons.append("Trend UP (Price > MA50 & MA20 > MA50)")
+
+#         # 2. Volume Filter (Avg > 500k and Rel Vol > 1.2)
+#         vol_ok = last['avg_vol_10'] >= 500000 and rel_vol >= 1.2
+#         if vol_ok:
+#             score += 1
+#             reasons.append(f"High Volume (Rel Vol: {rel_vol:.2f}x)")
+
+#         # 3. BREAKOUT (Crossover MA50)
+#         if prev['close'] <= prev['ma50'] and last['close'] > last['ma50']:
+#             score += 2
+#             reasons.append("MA50 Breakout")
+
+#         # 4. REBOUND (RSI crossover 30)
+#         if prev['rsi'] <= 30 and last['rsi'] > 30:
+#             score += 2
+#             reasons.append("RSI Rebound from Oversold")
+
+#         # 5. Momentum (RSI > 50)
+#         if last['rsi'] > 50:
+#             score += 1
+#             reasons.append("Bullish Momentum (RSI > 50)")
+
+#         # חישוב תמיכה בסיסי (Pivot Low - מינימום של 5 נרות אחרונים)
+#         support = df['low'].tail(5).min()
+
+#         return {
+#             "ticker": self.ticker,
+#             "price": float(last['close']),
+#             "score": score,
+#             "reasons": reasons,
+#             "sma_20": float(last['ma20']),
+#             "sma_50": float(last['ma50']),
+#             "rsi": float(last['rsi']),
+#             "rel_vol": float(rel_vol),
+#             "support": float(support)
+#         }
+
+
+
+# import pandas as pd
+# import pandas_ta as ta
+
+# class TAEngine:
+#     def __init__(self, ticker, df):
+#         self.ticker = ticker
+#         self.df = df
+
+#     def analyze(self):
+#         df = self.df
+#         if df is None or len(df) < 50:
+#             return None
+
+#         df.columns = [col.lower() for col in df.columns]
+
+#         # --- אינדיקטורים בסיסיים ---
+#         df['ma20'] = ta.sma(df['close'], length=20)
+#         df['ma50'] = ta.sma(df['close'], length=50)
+#         df['rsi'] = ta.rsi(df['close'], length=14)
+#         df['avg_vol_10'] = ta.sma(df['volume'], length=10)
+
+#         # --- הוספת רצועות בולינג'ר לזיהוי דחיסה (Squeeze) ---
+#         bbands = ta.bbands(df['close'], length=20, std=2)
+#         df['bb_lower'] = bbands['BBL_20_2.0']
+#         df['bb_upper'] = bbands['BBU_20_2.0']
+#         df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['ma20'] # רוחב הרצועות
+
+#         last = df.iloc[-1]
+#         prev = df.iloc[-2]
+
+#         reasons = []
+#         score = 0
+
+#         # 1. זיהוי דחיסה (Squeeze) - רצועות בולינג'ר צרות מאוד (מתחת לממוצע ההיסטורי)
+#         avg_width = df['bb_width'].tail(20).mean()
+#         is_squeezing = last['bb_width'] < avg_width * 0.8 # דחיסה של 20% מהממוצע
+
+#         # 2. פריצה טרייה של ממוצע 20 (Early Signal)
+#         is_fresh_breakout = prev['close'] <= last['ma20'] and last['close'] > last['ma20']
+
+#         # 3. ווליום מתגבר (יותר מ-1.1 מהממוצע)
+#         rel_vol = last['volume'] / last['avg_vol_10'] if last['avg_vol_10'] > 0 else 0
+
+#         # --- לוגיקת הציון החדשה (Early Bird) ---
+
+#         # אם יש דחיסה והתחלה של פריצה - זה ה-Sweet Spot
+#         if is_squeezing and last['close'] > last['ma20']:
+#             score += 2
+#             reasons.append("Volatility Squeeze (Potential Explosion)")
+
+#         if is_fresh_breakout:
+#             score += 2
+#             reasons.append("Fresh MA20 Breakout (Early Entry)")
+
+#         if rel_vol > 1.2:
+#             score += 1
+#             reasons.append(f"Volume Pickup ({rel_vol:.1f}x)")
+
+#         # תמיכה טכנית (השפל של 5 הימים האחרונים)
+#         support = df['low'].tail(5).min()
+
+#         # אם המניה כבר עלתה יותר מדי (RSI > 70), נוריד ציון כדי לא להיכנס בשיא
+#         if last['rsi'] > 70:
+#             score -= 1
+#             reasons.append("Overbought (Caution: Extension)")
+
+#         return {
+#             "ticker": self.ticker,
+#             "price": float(last['close']),
+#             "score": score,
+#             "reasons": reasons,
+#             "sma_20": float(last['ma20']),
+#             "sma_50": float(last['ma50']),
+#             "rsi": float(last['rsi']),
+#             "rel_vol": float(rel_vol),
+#             "support": float(support),
+#             "is_early": is_fresh_breakout or is_squeezing
+#         }
+
+
+
 import pandas as pd
 import pandas_ta as ta
 
@@ -148,58 +307,86 @@ class TAEngine:
 
     def analyze(self):
         df = self.df
+        # בדיקה שיש מספיק נתונים
         if df is None or len(df) < 50:
             return None
 
+        # המרת שמות עמודות לאותיות קטנות (למניעת שגיאות)
         df.columns = [col.lower() for col in df.columns]
 
-        # --- חישוב אינדיקטורים (זהה ל-Pinescript) ---
-        df['ma20'] = ta.sma(df['close'], length=20)
-        df['ma50'] = ta.sma(df['close'], length=50)
-        df['rsi'] = ta.rsi(df['close'], length=14)
+        try:
+            # --- אינדיקטורים בסיסיים ---
+            df['ma20'] = ta.sma(df['close'], length=20)
+            df['ma50'] = ta.sma(df['close'], length=50)
+            df['rsi'] = ta.rsi(df['close'], length=14)
+            df['avg_vol'] = ta.sma(df['volume'], length=10)
 
-        # ווליום וממוצע ווליום (10 ימים)
-        df['avg_vol_10'] = ta.sma(df['volume'], length=10)
+            # --- תיקון השגיאה: חישוב בולינג'ר ---
+            bbands = ta.bbands(df['close'], length=20, std=2)
 
-        # נתונים לנר הנוכחי ולנר הקודם
+            if bbands is None or bbands.empty:
+                return None
+
+            # במקום להסתמך על שמות (כמו 'BBU_20_2.0'), ניקח לפי מיקום:
+            # עמודה 0 = רצועה תחתונה (Lower)
+            # עמודה 1 = ממוצע (Middle)
+            # עמודה 2 = רצועה עליונה (Upper)
+            df['bb_lower'] = bbands.iloc[:, 0]
+            df['bb_upper'] = bbands.iloc[:, 2]
+
+            # חישוב רוחב הרצועות (Squeeze Check)
+            # טיפול במקרה של חלוקה באפס
+            df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['ma20']
+
+        except Exception as e:
+            print(f"⚠️ Calculation Error for {self.ticker}: {e}")
+            return None
+
+        # נתונים אחרונים
         last = df.iloc[-1]
         prev = df.iloc[-2]
 
-        # ווליום יחסי
-        rel_vol = last['volume'] / last['avg_vol_10'] if last['avg_vol_10'] > 0 else 0
-
-        # --- לוגיקת האסטרטגיה (Swing Webhook logic) ---
-        reasons = []
         score = 0
+        reasons = []
 
-        # 1. Trend UP (Price > MA50 and MA20 > MA50)
-        is_trend_up = last['close'] > last['ma50'] and last['ma20'] > last['ma50']
-        if is_trend_up:
-            score += 1
-            reasons.append("Trend UP (Price > MA50 & MA20 > MA50)")
+        # וודא שהנתונים קיימים (לא NaN)
+        if pd.isna(last['bb_width']) or pd.isna(last['rsi']):
+            return None
 
-        # 2. Volume Filter (Avg > 500k and Rel Vol > 1.2)
-        vol_ok = last['avg_vol_10'] >= 500000 and rel_vol >= 1.2
-        if vol_ok:
-            score += 1
-            reasons.append(f"High Volume (Rel Vol: {rel_vol:.2f}x)")
+        # 1. בדיקת Squeeze (האם הרצועות צרות מהממוצע?)
+        avg_width = df['bb_width'].tail(20).mean()
+        is_squeezing = last['bb_width'] < (avg_width * 0.9) # צר ב-10% מהרגיל
 
-        # 3. BREAKOUT (Crossover MA50)
-        if prev['close'] <= prev['ma50'] and last['close'] > last['ma50']:
+        # 2. בדיקת פריצה מוקדמת (Fresh Breakout)
+        # המחיר חצה את ה-20 למעלה היום או אתמול
+        crossed_ma20 = (prev['close'] < last['ma20'] and last['close'] > last['ma20']) or \
+                       (last['low'] < last['ma20'] and last['close'] > last['ma20'])
+
+        # 3. בדיקת ווליום
+        rel_vol = last['volume'] / last['avg_vol'] if last['avg_vol'] > 0 else 0
+
+        # --- מתן ניקוד לזיהוי מוקדם ---
+
+        if is_squeezing:
             score += 2
-            reasons.append("MA50 Breakout")
+            reasons.append("Volatility Squeeze (Energy Building)")
 
-        # 4. REBOUND (RSI crossover 30)
-        if prev['rsi'] <= 30 and last['rsi'] > 30:
+        if crossed_ma20:
             score += 2
-            reasons.append("RSI Rebound from Oversold")
+            reasons.append("Fresh MA20 Breakout")
 
-        # 5. Momentum (RSI > 50)
-        if last['rsi'] > 50:
+        if rel_vol > 1.2:
             score += 1
-            reasons.append("Bullish Momentum (RSI > 50)")
+            reasons.append(f"High Volume ({rel_vol:.1f}x)")
 
-        # חישוב תמיכה בסיסי (Pivot Low - מינימום של 5 נרות אחרונים)
+        # הגנה: אם המניה כבר טסה (RSI > 70), אל תיתן לה ציון גבוה
+        if last['rsi'] > 70:
+            score -= 2
+            reasons.append("Overbought (Too Late?)")
+        elif last['rsi'] > 50 and last['rsi'] < 70:
+            score += 1 # זה הטווח המושלם
+
+        # מציאת תמיכה לסטופ-לוס (הנמוך של 5 ימים אחרונים)
         support = df['low'].tail(5).min()
 
         return {
@@ -207,9 +394,7 @@ class TAEngine:
             "price": float(last['close']),
             "score": score,
             "reasons": reasons,
-            "sma_20": float(last['ma20']),
-            "sma_50": float(last['ma50']),
+            "support": float(support),
             "rsi": float(last['rsi']),
-            "rel_vol": float(rel_vol),
-            "support": float(support)
+            "squeeze": is_squeezing
         }

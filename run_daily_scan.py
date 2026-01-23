@@ -144,7 +144,7 @@ def run_scan():
 
     try:
         potential_stocks = ScreenerService.get_candidates()
-        potential_stocks = ["NVDA"]
+        # potential_stocks= [ "IBM" ]
         if not potential_stocks:
             print("❌ No candidates found.")
             return
@@ -166,7 +166,7 @@ def run_scan():
                 score = analysis.get('score', 0)
 
                 # רק מניות עם ציון טוב עוברות לניתוח AI מלא
-                if score >= 2:
+                if score >= 0:
                     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
                     already_sent = db.query(AlertHistory).filter(
                         AlertHistory.ticker == ticker,
