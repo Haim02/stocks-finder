@@ -6,6 +6,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Settings(BaseSettings):
+    # MongoDB
+    MONGO_URI: str = os.getenv("MONGO_URI", "mongodb+srv://haim:951753@cluster0.u9pa2yh.mongodb.net/")
+    DB_NAME: str = "stocks_finder"
+
+    # --- Email Settings (SMTP - עבור הקוד החדש) ---
+    # אלו המשתנים שהקוד החדש מחפש
+    EMAIL_SENDER: Optional[str] = os.getenv("EMAIL_SENDER")   # המייל השולח (Gmail)
+    EMAIL_PASSWORD: Optional[str] = os.getenv("EMAIL_PASSWORD")  # סיסמת אפליקציה
+    EMAIL_RECEIVER: Optional[str] = os.getenv("EMAIL_RECEIVER")  # המייל המקבל
+
+
     # API & Security
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
     FINNHUB_API_KEY: str = os.getenv("FINNHUB_API_KEY")
