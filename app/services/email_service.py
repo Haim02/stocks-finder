@@ -1832,6 +1832,31 @@ from app.core.config import settings
 if settings.RESEND_API_KEY:
     resend.api_key = settings.RESEND_API_KEY
 
+import re as _re
+
+
+def _md_to_html(text: str) -> str:
+    """
+    Lightweight markdown → HTML for the AI analyst output.
+    Converts ## headers, **bold**, and newlines.
+    """
+    if not text:
+        return ""
+    # ## Section headers
+    text = _re.sub(
+        r"^## (.+)$",
+        r'<div style="font-weight:700;color:#0d2b5e;margin:12px 0 4px;font-size:14px;'
+        r'border-right:3px solid #0051a5;padding-right:8px;">\1</div>',
+        text,
+        flags=_re.MULTILINE,
+    )
+    # **bold**
+    text = _re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+    # paragraph breaks
+    text = text.replace("\n\n", "<br><br>").replace("\n", "<br>")
+    return text
+
+
 class EmailService:
     @staticmethod
     def format_number(num):
@@ -1842,137 +1867,288 @@ class EmailService:
 
     @staticmethod
     def send_report(stock_opportunities, general_news):
-        if not stock_opportunities and not general_news: return
-        if not settings.RESEND_API_KEY: return
+        if not stock_opportunities and not general_news:
+            return
+        if not settings.RESEND_API_KEY:
+            return
 
-        subject = f"🚀 דוח מסחר: {len(stock_opportunities)} הזדמנויות"
+        n = len(stock_opportunities)
+        subject = f"🏦 Equity Research Report: {n} הזדמנויות מוסדיות"
 
-        html_body = """
-        <div dir="rtl" style="font-family: 'Segoe UI', sans-serif; max-width: 750px; margin: 0 auto; background: #f4f6f8; padding: 20px;">
-            <h2 style="background: linear-gradient(90deg, #1e3c72, #2a5298); color: white; padding: 20px; border-radius: 8px; text-align: center;">
-                📊 דוח מסחר היברידי (AI + SMA150)
-            </h2>
-        """
+        html_body = (
+            '<div dir="rtl" style="font-family:\'Segoe UI\',Arial,sans-serif;'
+            "max-width:760px;margin:0 auto;background:#f0f2f5;padding:20px;\">"
+            '<div style="background:linear-gradient(135deg,#003087,#0051a5);'
+            "color:white;padding:22px 30px;border-radius:10px;margin-bottom:24px;"
+            'text-align:center;">'
+            '<div style="font-size:11px;letter-spacing:2px;opacity:0.7;margin-bottom:4px;">'
+            "EQUITY RESEARCH · INSTITUTIONAL INTELLIGENCE</div>"
+            f'<h2 style="margin:0;font-size:22px;font-weight:700;">📊 דוח אנליסט בכיר — {n} הזדמנויות</h2>'
+            "</div>"
+        )
 
-        if stock_opportunities:
-            for opp in stock_opportunities:
-                fin = opp['financials']
-                rev = fin.get('revenue', {})
-                ni = fin.get('net_income', {})
-                eff = fin.get('efficiency', {}) # שליפת נתוני התייעלות
+        for opp in stock_opportunities:
+            ticker = opp["ticker"]
+            price  = opp.get("price", "N/A")
+            score  = int(opp.get("score", 0))
+            fin    = opp.get("financials", {})
 
-                tech_signal = fin.get('technical_signal', 'ללא איתות')
-                trend_status = fin.get('trend_status', 'ללא מידע')
-                vol_ratio = fin.get('volume_ratio', 1.0)
+            rev = fin.get("revenue", {})
+            ni  = fin.get("net_income", {})
 
-                # צבעים לטכני
-                signal_bg = "#8e44ad" if "SMA150" in str(tech_signal) else ("#d35400" if "פריצת" in str(tech_signal) else "#7f8c8d")
-                trend_color = "#27ae60" if "מעל SMA150" in trend_status else "#c0392b"
+            tech_signal  = fin.get("technical_signal") or "—"
+            trend_status = fin.get("trend_status", "—")
+            vol_ratio    = fin.get("volume_ratio", 1.0)
 
-                # צבעים לווליום
-                vol_text = "ווליום רגיל"
-                vol_color = "#7f8c8d"
-                if vol_ratio > 1.5:
-                    vol_text = f"🔥 ווליום גבוה (x{vol_ratio})"
-                    vol_color = "#d35400"
-                elif vol_ratio > 3.0:
-                    vol_text = f"🚀 ווליום מטורף (x{vol_ratio})"
-                    vol_color = "#c0392b"
+            # Technical badge colours
+            signal_bg  = "#6d28d9" if "SMA150" in str(tech_signal) else (
+                          "#d97706" if "פריצת" in str(tech_signal) else "#64748b")
+            trend_color = "#16a34a" if "מעל SMA150" in trend_status else "#dc2626"
 
-                # --- לוגיקה לתצוגת התייעלות ---
-                eff_curr = eff.get('curr')
-                eff_prev = eff.get('prev')
-                eff_display = "-"
-                eff_color = "black"
+            # Volume badge
+            if vol_ratio >= 3.0:
+                vol_text, vol_color = f"🚀 ווליום x{vol_ratio}", "#dc2626"
+            elif vol_ratio >= 1.5:
+                vol_text, vol_color = f"🔥 ווליום x{vol_ratio}", "#d97706"
+            else:
+                vol_text, vol_color = f"ווליום x{vol_ratio}", "#64748b"
 
-                if isinstance(eff_curr, (int, float)) and isinstance(eff_prev, (int, float)):
-                    # אם היחס ירד (פחות הוצאות על הכנסות) -> זה טוב!
-                    if eff_curr < eff_prev:
-                        eff_display = "✅ שיפור (התייעלות)"
-                        eff_color = "green"
-                    elif eff_curr > eff_prev:
-                        eff_display = "⚠️ הרעה (בזבזנות)"
-                        eff_color = "red"
-                    else:
-                        eff_display = "ללא שינוי"
+            # XGBoost confidence badge
+            conf = opp.get("confidence")
+            if conf is not None:
+                conf_color = "#16a34a" if conf >= 60 else ("#d97706" if conf >= 40 else "#dc2626")
+                conf_badge = (
+                    f'<div style="background:{conf_color};color:white;padding:6px 14px;'
+                    f'border-radius:20px;font-weight:700;font-size:13px;'
+                    f'display:inline-block;margin-left:8px;">'
+                    f"ביטחון XGBoost: {conf:.0f}%</div>"
+                )
+            else:
+                conf_badge = ""
 
-                html_body += f"""
-                <div style="background: white; border-radius: 12px; padding: 25px; margin-bottom: 25px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+            # 5-year margins
+            gm = fin.get("gross_margin_5y", [])
+            om = fin.get("operating_margin_5y", [])
+            nm = fin.get("net_margin_5y", [])
+            gm_str = " → ".join(f"{m:.1f}%" for m in gm[:4]) if gm else "N/A"
+            om_str = " → ".join(f"{m:.1f}%" for m in om[:4]) if om else "N/A"
+            nm_str = " → ".join(f"{m:.1f}%" for m in nm[:4]) if nm else "N/A"
 
-                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px;">
-                        <div>
-                            <h1 style="margin: 0; color: #2c3e50;">{opp['ticker']} <span style="font-size:16px; color:#555;">${opp['price']}</span></h1>
-                        </div>
-                        <div style="background: #27ae60; color: white; padding: 5px 12px; border-radius: 20px; font-weight: bold;">
-                            Score: {int(opp['score'])}
-                        </div>
-                    </div>
+            # Balance sheet
+            dte        = fin.get("debt_to_equity", "N/A")
+            curr_ratio = fin.get("current_ratio", "N/A")
+            cash_str   = EmailService.format_number(fin.get("total_cash", 0))
+            debt_str   = EmailService.format_number(fin.get("total_debt", 0))
 
-                    <div style="display:flex; gap:10px; flex-wrap:wrap; margin: 15px 0;">
-                        <span style="background:{signal_bg}; color:white; padding:4px 10px; border-radius:4px; font-weight:bold; font-size:13px;">{tech_signal}</span>
-                        <span style="background:{trend_color}; color:white; padding:4px 10px; border-radius:4px; font-weight:bold; font-size:13px;">{trend_status}</span>
-                        <span style="background:{vol_color}; color:white; padding:4px 10px; border-radius:4px; font-weight:bold; font-size:13px;">{vol_text}</span>
-                    </div>
+            # FCF
+            fcf_list = fin.get("fcf_history", [])
+            fcf_str  = " → ".join(EmailService.format_number(v) for v in fcf_list[:4]) if fcf_list else "N/A"
+            fcf_cagr = fin.get("fcf_growth", "N/A")
 
-                    <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 15px; font-size: 14px; line-height: 1.5;">
-                        <b>🏢 פרופיל חברה:</b> {opp.get('ai_hebrew_desc', 'אין תיאור זמין')}
-                    </div>
+            # Valuation
+            pe  = fin.get("pe_ratio", "N/A")
+            peg = fin.get("peg_ratio", "N/A")
 
-                    <div style="margin-bottom: 15px;">
-                        <b style="color:#d35400;">📰 כותרת:</b> {opp['headline']}
-                    </div>
+            # Revenue / net income QoQ
+            rev_c  = rev.get("change", 0)
+            ni_c   = ni.get("change", 0)
 
-                    <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                        <b style="color:#1565c0;">💡 ניתוח AI:</b>
-                        <div style="margin-top:5px; font-size:14px;">{opp.get('ai_analysis', '...')}</div>
-                    </div>
+            # AI analysis with markdown → HTML
+            analysis_html = _md_to_html(opp.get("ai_analysis", ""))
 
-                    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                        <tr style="background: #eee;">
-                            <th style="padding:8px; text-align:right;">נתון</th>
-                            <th style="padding:8px; text-align:right;">נוכחי</th>
-                            <th style="padding:8px; text-align:right;">קודם</th>
-                            <th style="padding:8px; text-align:right;">מגמה</th>
-                        </tr>
-                        <tr style="border-bottom:1px solid #eee;">
-                            <td style="padding:8px;">הכנסות</td>
-                            <td style="padding:8px;">{EmailService.format_number(rev.get('curr', 0))}</td>
-                            <td style="padding:8px;">{EmailService.format_number(rev.get('prev', 0))}</td>
-                            <td style="padding:8px; color:{'green' if rev.get('change',0) > 0 else 'red'}">{rev.get('change', 0)}%</td>
-                        </tr>
-                        <tr style="border-bottom:1px solid #eee;">
-                            <td style="padding:8px;">רווח נקי</td>
-                            <td style="padding:8px;">{EmailService.format_number(ni.get('curr', 0))}</td>
-                            <td style="padding:8px;">{EmailService.format_number(ni.get('prev', 0))}</td>
-                            <td style="padding:8px; color:{'green' if ni.get('change',0) > 0 else 'red'}">{ni.get('change', 0)}%</td>
-                        </tr>
-                        <tr>
-                            <td style="padding:8px;">
-                                <b>יחס הוצאות</b><br>
-                                <span style="font-size:11px; color:#777;">(נמוך=טוב)</span>
-                            </td>
-                            <td style="padding:8px;">{eff_curr}%</td>
-                            <td style="padding:8px;">{eff_prev}%</td>
-                            <td style="padding:8px; color:{eff_color}; font-weight:bold;">{eff_display}</td>
-                        </tr>
-                    </table>
-                </div>
-                """
+            html_body += f"""
+<div style="background:white;border-radius:12px;margin-bottom:28px;
+     box-shadow:0 4px 15px rgba(0,0,0,0.07);overflow:hidden;
+     border:1px solid #e2e8f0;">
+
+  <!-- ── Header bar ── -->
+  <div style="background:linear-gradient(90deg,#003087,#0051a5);
+              color:white;padding:16px 24px;
+              display:flex;justify-content:space-between;align-items:center;">
+    <div>
+      <div style="font-size:24px;font-weight:700;letter-spacing:1px;">{ticker}</div>
+      <div style="font-size:13px;opacity:0.8;margin-top:2px;">${price}</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      {conf_badge}
+      <div style="background:rgba(255,255,255,0.2);border-radius:20px;
+                  padding:6px 14px;font-size:13px;font-weight:700;">
+        ציון חדשות: {score}
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Technical signals strip ── -->
+  <div style="background:#f8fafc;padding:10px 24px;
+              display:flex;gap:8px;flex-wrap:wrap;
+              border-bottom:1px solid #e2e8f0;">
+    <span style="background:{signal_bg};color:white;padding:4px 10px;
+                 border-radius:4px;font-weight:600;font-size:12px;">{tech_signal}</span>
+    <span style="background:{trend_color};color:white;padding:4px 10px;
+                 border-radius:4px;font-weight:600;font-size:12px;">{trend_status}</span>
+    <span style="background:{vol_color};color:white;padding:4px 10px;
+                 border-radius:4px;font-weight:600;font-size:12px;">{vol_text}</span>
+  </div>
+
+  <!-- ── Body ── -->
+  <div style="padding:24px;">
+
+    <!-- Company profile -->
+    <div style="background:#f8fafc;padding:12px 16px;border-radius:6px;
+                margin-bottom:16px;font-size:14px;line-height:1.5;
+                border-right:3px solid #cbd5e1;">
+      <b>🏢 פרופיל חברה:</b> {opp.get("ai_hebrew_desc", "—")}
+    </div>
+
+    <!-- Catalyst -->
+    <div style="margin-bottom:16px;font-size:14px;">
+      <b style="color:#b45309;">📰 קטליסט:</b> {opp.get("headline", "—")}
+    </div>
+
+    <!-- Goldman Sachs Research Note -->
+    <div style="background:#eef2ff;border-right:4px solid #003087;
+                padding:16px 20px;border-radius:6px;margin-bottom:20px;">
+      <div style="font-size:11px;font-weight:700;color:#003087;
+                  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">
+        🏦 הערת מחקר — Senior Equity Analyst
+      </div>
+      <div style="font-size:14px;line-height:1.75;color:#1e293b;">
+        {analysis_html}
+      </div>
+    </div>
+
+    <!-- Financial data table -->
+    <div style="font-size:13px;font-weight:600;color:#334155;margin-bottom:8px;">
+      📊 נתונים פיננסיים מוסדיים
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;text-align:right;">
+
+      <!-- Margins header -->
+      <tr style="background:#dbeafe;">
+        <td colspan="4" style="padding:7px 10px;font-weight:700;color:#1d4ed8;">
+          מרווחי רווחיות (5 שנים, חדש→ישן)
+        </td>
+      </tr>
+      <tr style="border-bottom:1px solid #e2e8f0;">
+        <td style="padding:6px 10px;color:#475569;">גרוס מרג'ין</td>
+        <td colspan="3" style="padding:6px 10px;">{gm_str}</td>
+      </tr>
+      <tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+        <td style="padding:6px 10px;color:#475569;">מרג'ין תפעולי</td>
+        <td colspan="3" style="padding:6px 10px;">{om_str}</td>
+      </tr>
+      <tr style="border-bottom:1px solid #e2e8f0;">
+        <td style="padding:6px 10px;color:#475569;">מרג'ין נקי</td>
+        <td colspan="3" style="padding:6px 10px;">{nm_str}</td>
+      </tr>
+
+      <!-- QoQ quarterly -->
+      <tr style="background:#dcfce7;">
+        <td colspan="4" style="padding:7px 10px;font-weight:700;color:#15803d;">
+          ביצועי רבעון (QoQ)
+        </td>
+      </tr>
+      <tr style="border-bottom:1px solid #e2e8f0;">
+        <td style="padding:6px 10px;color:#475569;">הכנסות</td>
+        <td style="padding:6px 10px;">{EmailService.format_number(rev.get("curr", 0))}</td>
+        <td style="padding:6px 10px;">{EmailService.format_number(rev.get("prev", 0))}</td>
+        <td style="padding:6px 10px;color:{'#16a34a' if rev_c > 0 else '#dc2626'};font-weight:600;">
+          {rev_c:+.1f}%
+        </td>
+      </tr>
+      <tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+        <td style="padding:6px 10px;color:#475569;">רווח נקי</td>
+        <td style="padding:6px 10px;">{EmailService.format_number(ni.get("curr", 0))}</td>
+        <td style="padding:6px 10px;">{EmailService.format_number(ni.get("prev", 0))}</td>
+        <td style="padding:6px 10px;color:{'#16a34a' if ni_c > 0 else '#dc2626'};font-weight:600;">
+          {ni_c:+.1f}%
+        </td>
+      </tr>
+
+      <!-- Balance sheet + FCF -->
+      <tr style="background:#fdf4ff;">
+        <td colspan="4" style="padding:7px 10px;font-weight:700;color:#7e22ce;">
+          מאזן · FCF · שווי
+        </td>
+      </tr>
+      <tr style="border-bottom:1px solid #e2e8f0;">
+        <td style="padding:6px 10px;color:#475569;">חוב/הון (D/E)</td>
+        <td style="padding:6px 10px;">{dte}</td>
+        <td style="padding:6px 10px;color:#475569;">יחס שוטף</td>
+        <td style="padding:6px 10px;">{curr_ratio}</td>
+      </tr>
+      <tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+        <td style="padding:6px 10px;color:#475569;">מזומן</td>
+        <td style="padding:6px 10px;">{cash_str}</td>
+        <td style="padding:6px 10px;color:#475569;">חוב כולל</td>
+        <td style="padding:6px 10px;">{debt_str}</td>
+      </tr>
+      <tr style="border-bottom:1px solid #e2e8f0;">
+        <td style="padding:6px 10px;color:#475569;">FCF (חדש→ישן)</td>
+        <td colspan="3" style="padding:6px 10px;">{fcf_str}</td>
+      </tr>
+      <tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+        <td style="padding:6px 10px;color:#475569;">FCF CAGR 3 שנים</td>
+        <td style="padding:6px 10px;">{fcf_cagr}%</td>
+        <td style="padding:6px 10px;color:#475569;">P/E · PEG</td>
+        <td style="padding:6px 10px;">{pe} · {peg}</td>
+      </tr>
+
+    </table>
+
+  </div><!-- /body -->
+
+  <!-- ── Footer links ── -->
+  <div style="background:#f8fafc;padding:12px 24px;border-top:1px solid #e2e8f0;
+              display:flex;gap:10px;justify-content:flex-start;flex-wrap:wrap;">
+    <a href="https://www.tradingview.com/chart/?symbol={ticker}"
+       style="background:#1565c0;color:white;text-decoration:none;
+              padding:8px 16px;border-radius:5px;font-size:13px;font-weight:600;">
+      📈 גרף TradingView ➜
+    </a>
+    <a href="https://finviz.com/quote.ashx?t={ticker}"
+       style="background:#34495e;color:white;text-decoration:none;
+              padding:8px 16px;border-radius:5px;font-size:13px;font-weight:600;">
+      🔍 Finviz ➜
+    </a>
+    <a href="https://stockgrid.io/darkpools/{ticker}"
+       style="background:#2c3e50;color:white;text-decoration:none;
+              padding:8px 16px;border-radius:5px;font-size:13px;font-weight:600;">
+      🌑 Dark Pools ➜
+    </a>
+  </div>
+
+</div>
+"""
 
         if general_news:
-             html_body += "<h3 style='margin-top:30px; border-bottom:2px solid #ccc;'>חדשות כלליות</h3>"
-             for news in general_news:
-                html_body += f"<div style='margin-bottom:10px; font-size:13px;'>• <b>{news['headline']}</b> <a href='{news['url']}'>קרא עוד</a></div>"
+            html_body += (
+                "<div style='margin-top:20px;background:white;border-radius:8px;"
+                "padding:16px 20px;box-shadow:0 2px 8px rgba(0,0,0,0.05);'>"
+                "<h3 style='margin:0 0 12px;font-size:15px;border-bottom:1px solid #eee;padding-bottom:8px;'>"
+                "📰 חדשות שוק כלליות</h3>"
+            )
+            for news in general_news:
+                html_body += (
+                    f"<div style='margin-bottom:8px;font-size:13px;'>"
+                    f"• <b>{news['headline']}</b> "
+                    f"<a href='{news['url']}' style='color:#1565c0;'>קרא עוד</a></div>"
+                )
+            html_body += "</div>"
 
-        html_body += "</div>"
+        html_body += (
+            "<div style='text-align:center;margin-top:16px;font-size:11px;color:#94a3b8;'>"
+            "Institutional Equity Research · Powered by AI + XGBoost · "
+            "Not investment advice</div></div>"
+        )
 
         try:
             resend.Emails.send({
-                "from": settings.FROM_EMAIL,
-                "to": [settings.ALERT_TO_EMAIL],
+                "from":    settings.FROM_EMAIL,
+                "to":      [settings.ALERT_TO_EMAIL],
                 "subject": subject,
-                "html": html_body
+                "html":    html_body,
             })
-            print(f"✅ Email sent!")
+            print(f"✅ Institutional research email sent ({n} stocks).")
         except Exception as e:
             print(f"❌ Resend Error: {e}")

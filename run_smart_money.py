@@ -182,10 +182,14 @@ def send_hebrew_smart_money_email(
                 </tr>
             </table>
 
-            <div style="text-align:center;margin-top:20px;">
+            <div style="display:flex;gap:10px;justify-content:center;margin-top:20px;flex-wrap:wrap;">
+                <a href="https://www.tradingview.com/chart/?symbol={ticker}"
+                   style="background-color:#1565c0;color:white;text-decoration:none;padding:10px 20px;border-radius:5px;font-size:14px;font-weight:600;">
+                    📈 גרף TradingView ➜
+                </a>
                 <a href="https://stockgrid.io/darkpools/{ticker}"
                    style="background-color:#34495e;color:white;text-decoration:none;padding:10px 20px;border-radius:5px;font-size:14px;">
-                    צפה בנתוני Dark Pools ➜
+                    🌑 Dark Pools ➜
                 </a>
             </div>
         </div>
