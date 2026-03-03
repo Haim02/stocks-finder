@@ -64,6 +64,8 @@ class SmartMoneyService:
             logger.warning("No candidates found from screener.")
             return []
 
+        # Persist so market intelligence can scope its work to recent candidates
+        MongoDB.save_scanner_candidates(candidates, source="smart_money")
         logger.info("Finviz returned %d candidates. Deep analyzing...", len(candidates))
         picks: list[dict] = []
 

@@ -92,6 +92,9 @@ def run_hybrid_scan():
     final_list = list(target_tickers)
     logger.info("Total unique candidates to analyze: %d", len(final_list))
 
+    # Persist candidates so run_market_intelligence.py can scope its work
+    MongoDB.save_scanner_candidates(final_list, source="news_scan")
+
     stock_opportunities: list[dict] = []
 
     for ticker in final_list:

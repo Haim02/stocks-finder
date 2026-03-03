@@ -111,6 +111,54 @@ class MongoDB:
             logger.exception("Failed to check sent_recently for %s", ticker)
             return False
 
+    # --- Scanner Candidates (for market intelligence pipeline) ---
+
+    @classmethod
+    def save_scanner_candidates(cls, tickers: list[str], source: str) -> None:
+        """
+        Records every ticker surfaced by a screener run (Finviz / TradingView /
+        Smart Money).  One document per (ticker, source) — the timestamp is
+        refreshed on every call so get_recent_scanner_candidates() always sees
+        the freshest scan time.
+
+        Collection: scanner_candidates
+        """
+        if not tickers:
+            return
+        try:
+            db  = cls.get_db()
+            now = datetime.now(pytz.utc)
+            for ticker in tickers:
+                db.scanner_candidates.update_one(
+                    {"ticker": ticker.upper(), "source": source},
+                    {"$set": {"ticker": ticker.upper(), "source": source,
+                              "scanned_at": now}},
+                    upsert=True,
+                )
+            logger.info(
+                "Saved %d scanner candidates from source '%s'.", len(tickers), source
+            )
+        except Exception:
+            logger.exception("Failed to save scanner candidates (source=%s)", source)
+
+    @classmethod
+    def get_recent_scanner_candidates(cls, hours: int = 48) -> list[str]:
+        """
+        Returns deduplicated tickers that appeared in any screener run within
+        the last `hours` hours, sorted alphabetically.
+        """
+        try:
+            db     = cls.get_db()
+            cutoff = datetime.now(pytz.utc) - timedelta(hours=hours)
+            docs   = db.scanner_candidates.find(
+                {"scanned_at": {"$gte": cutoff}},
+                {"ticker": 1, "_id": 0},
+            )
+            return sorted({d["ticker"] for d in docs})
+        except Exception:
+            logger.exception("Failed to fetch recent scanner candidates")
+            return []
+
     # --- Market Intelligence / Daily Sentiment ---
 
     @classmethod
