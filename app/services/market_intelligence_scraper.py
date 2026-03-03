@@ -87,13 +87,24 @@ class MarketIntelligenceScraper:
     # ------------------------------------------------------------------
 
     def fetch_headlines(self, ticker: str) -> list[str]:
-        """Returns up to MAX_HEADLINES recent headlines from yfinance."""
+        """
+        Returns up to MAX_HEADLINES recent headlines from yfinance.
+
+        yfinance ≥1.0 changed the news payload: the title now lives inside a
+        nested 'content' dict  →  item['content']['title'].
+        Older builds exposed it at the top level as item['title'] or item['headline'].
+        We probe all three paths so the code works across yfinance versions.
+        """
         try:
             news_items = yf.Ticker(ticker).news or []
             headlines: list[str] = []
             for item in news_items[:MAX_HEADLINES]:
-                # yfinance returns 'title' (v0.2+) or 'headline' (older builds)
-                title = item.get("title") or item.get("headline", "")
+                content = item.get("content") or {}
+                title = (
+                    content.get("title")          # yfinance ≥1.0  (nested)
+                    or item.get("title")           # yfinance <1.0  (flat)
+                    or item.get("headline", "")    # legacy alias
+                )
                 if title:
                     headlines.append(title.strip())
             logger.debug("Fetched %d headlines for %s", len(headlines), ticker)
