@@ -172,152 +172,331 @@
 
 
 
+# import pandas as pd
+# import yfinance as yf
+# from datetime import datetime, timedelta
+# from sklearn.feature_extraction.text import TfidfVectorizer
+# from sklearn.ensemble import RandomForestClassifier
+# import joblib
+# import os
+# import pytz
+# from app.data.mongo_client import MongoDB
+
+# # הגדרות לאימון
+# MODEL_PATH = "app/models/news_classifier.pkl"
+# VECTORIZER_PATH = "app/models/tfidf_vectorizer.pkl"
+# MIN_SAMPLES_TO_TRAIN = 10
+
+# def get_price_change(ticker, date):
+#     """
+#     בודק האם המחיר עלה ב-3 הימים שלאחר החדשות.
+#     """
+#     try:
+#         if date.tzinfo is None:
+#             date = date.replace(tzinfo=pytz.utc)
+
+#         start_date = date
+#         end_date = date + timedelta(days=4)
+
+#         stock = yf.Ticker(ticker)
+#         df = stock.history(start=start_date.strftime('%Y-%m-%d'),
+#                            end=end_date.strftime('%Y-%m-%d'))
+
+#         if df.empty or len(df) < 2:
+#             return None
+
+#         open_price = df['Open'].iloc[0]
+#         close_price = df['Close'].iloc[-1]
+#         max_price = df['High'].max()
+
+#         change_close = (close_price - open_price) / open_price
+#         change_high = (max_price - open_price) / open_price
+
+#         # תנאי הצלחה: עלייה של 3% בסגירה או זינוק של 5% במהלך היום
+#         if change_close > 0.03 or change_high > 0.05:
+#             return 1
+#         return 0
+
+#     except Exception as e:
+#         return None
+
+# def train_model():
+#     print("🧠 Starting Training Process (Duplicates Filter Enabled)...")
+
+#     raw_data = MongoDB.get_unlabeled_data()
+
+#     if not raw_data:
+#         print("📭 Database is empty or all items processed.")
+#         return
+
+#     print(f"📥 Found {len(raw_data)} items. Filtering duplicates & mature data...")
+
+#     labeled_news = []
+#     labels = []
+
+#     # --- התיקון: זיכרון לכותרות שראינו כבר ---
+#     seen_headlines = set()
+
+#     processed_count = 0
+#     skipped_count = 0
+#     duplicates_count = 0 # מונה כפילויות
+
+#     now = datetime.now(pytz.utc)
+
+#     for item in raw_data:
+#         ticker = item.get('ticker')
+#         headline = item.get('headline')
+
+#         # 1. סינון כפילויות מיידי
+#         if headline in seen_headlines:
+#             # מסמנים כטופל כדי שלא יופיע בפעם הבאה, אבל לא לומדים מזה שוב
+#             MongoDB.mark_as_processed(item['_id'])
+#             duplicates_count += 1
+#             continue
+
+#         # הוספה לזיכרון
+#         seen_headlines.add(headline)
+
+#         # המרת תאריך
+#         news_date = item.get('news_date')
+#         if isinstance(news_date, str):
+#             try:
+#                 news_date = datetime.fromisoformat(news_date)
+#             except:
+#                 MongoDB.mark_as_processed(item['_id'])
+#                 continue
+
+#         if news_date.tzinfo is None:
+#             news_date = news_date.replace(tzinfo=pytz.utc)
+
+#         # 2. האם עברו 3 ימים?
+#         if (now - news_date).days < 3:
+#             skipped_count += 1
+#             continue
+
+#         if not ticker or ticker == "GENERAL":
+#             MongoDB.mark_as_processed(item['_id'])
+#             continue
+
+#         # 3. בדיקת מחיר
+#         label = get_price_change(ticker, news_date)
+
+#         if label is not None:
+#             labeled_news.append(headline)
+#             labels.append(label)
+#             print(f"   ✅ Learned: {ticker} -> {label}") # ידפיס כל כותרת רק פעם אחת
+#             processed_count += 1
+#         else:
+#             print(f"   ⚠️ No data for {ticker}, skipping.")
+
+#         # סימון ב-DB
+#         MongoDB.mark_as_processed(item['_id'])
+
+#     print(f"\n📊 Summary:")
+#     print(f"   - Original items: {len(raw_data)}")
+#     print(f"   - Duplicates Removed: {duplicates_count}")
+#     print(f"   - Too new (Skipped): {skipped_count}")
+#     print(f"   - Successfully Trained: {processed_count}")
+
+#     if len(labeled_news) < MIN_SAMPLES_TO_TRAIN:
+#         print(f"⏳ Not enough unique data yet ({len(labeled_news)}/{MIN_SAMPLES_TO_TRAIN}).")
+#         return
+
+#     print(f"🎓 Training model on {len(labeled_news)} unique samples...")
+
+#     vectorizer = TfidfVectorizer(stop_words='english', max_features=2000)
+#     X = vectorizer.fit_transform(labeled_news)
+#     y = labels
+
+#     model = RandomForestClassifier(n_estimators=100, random_state=42)
+#     model.fit(X, y)
+
+#     if not os.path.exists("app/models"):
+#         os.makedirs("app/models")
+
+#     joblib.dump(model, MODEL_PATH)
+#     joblib.dump(vectorizer, VECTORIZER_PATH)
+
+#     print("🚀 Model successfully updated without duplicates!")
+
+# if __name__ == "__main__":
+#     train_model()
+
+
+"""
+XGBoost Price Model Trainer
+============================
+Fetches 2 years of OHLCV history for a broad universe of tickers (+ any tickers
+stored in MongoDB), engineers technical + sentiment features, and trains an XGBoost
+binary classifier to predict whether a stock will gain ≥5 % within the next 10
+trading days.
+
+Feature set:
+  Technical  — RSI, SMA ratios, volume ratio, momentum (5/10/20d), ATR, BB width
+  Sentiment  — LLM-scored daily sentiment (sent_score 1-10, sent_has_data flag)
+               sourced from MongoDB daily_market_sentiment collection.
+               Rows without a sentiment record default to neutral (5.0 / 0).
+
+Usage:
+    # 1. Populate sentiment data first (run daily):
+    python run_market_intelligence.py
+
+    # 2. Train (or retrain) the model:
+    python train_model.py
+
+Output:
+    app/models/xgb_price_model.pkl
+"""
+
+import logging
+import os
+from datetime import datetime, timedelta
+
+import joblib
+import numpy as np
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.ensemble import RandomForestClassifier
-import joblib
-import os
-import pytz
-from app.data.mongo_client import MongoDB
 
-# הגדרות לאימון
-MODEL_PATH = "app/models/news_classifier.pkl"
-VECTORIZER_PATH = "app/models/tfidf_vectorizer.pkl"
-MIN_SAMPLES_TO_TRAIN = 10
+try:
+    import xgboost as xgb
+except ImportError:
+    print("XGBoost is not installed. Run: pip install xgboost")
+    raise
 
-def get_price_change(ticker, date):
-    """
-    בודק האם המחיר עלה ב-3 הימים שלאחר החדשות.
-    """
+from app.services.ml_service import (
+    FEATURE_COLS,
+    FORWARD_DAYS,
+    GAIN_THRESHOLD,
+    XGB_MODEL_PATH,
+    add_sentiment_features,
+    extract_features,
+    label_rows,
+)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+MODEL_DIR = os.path.dirname(XGB_MODEL_PATH)
+MIN_ROWS_PER_TICKER = 60
+
+# Broad training universe — S&P 500 sample + small/mid caps for variety
+TRAINING_UNIVERSE = [
+    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AMD",
+    "INTC", "CRM", "ADBE", "ORCL", "NFLX", "PYPL", "SQ", "SHOP",
+    "SNAP", "TWLO", "ZM", "DDOG", "NET", "CRWD", "OKTA", "MDB",
+    "PLTR", "RBLX", "COIN", "HOOD", "SOFI", "UPST", "AFRM",
+    "JPM", "BAC", "GS", "MS", "C", "WFC", "AXP", "V", "MA",
+    "XOM", "CVX", "OXY", "SLB", "HAL", "COP", "EOG",
+    "PFE", "JNJ", "ABBV", "MRK", "LLY", "AMGN", "BIIB", "GILD", "REGN",
+    "DIS", "PARA", "WBD",
+    "TEVA", "RKT", "BABA", "BIDU", "NIO", "XPEV",
+    "SPY", "QQQ", "IWM",
+]
+
+
+def get_training_tickers() -> list[str]:
+    """Combine MongoDB picks with the default training universe."""
+    tickers = set(TRAINING_UNIVERSE)
     try:
-        if date.tzinfo is None:
-            date = date.replace(tzinfo=pytz.utc)
+        from app.data.mongo_client import MongoDB
+        db = MongoDB.get_db()
+        for doc in db["institutional_picks"].find({}, {"ticker": 1}):
+            if t := doc.get("ticker"):
+                tickers.add(t.upper())
+        for doc in db["news_events"].find({}, {"ticker": 1}):
+            if t := doc.get("ticker"):
+                tickers.add(t.upper())
+        logger.info("Total unique tickers (after MongoDB): %d", len(tickers))
+    except Exception as exc:
+        logger.warning("MongoDB ticker fetch failed (%s); using default universe.", exc)
+    return sorted(tickers)
 
-        start_date = date
-        end_date = date + timedelta(days=4)
 
-        stock = yf.Ticker(ticker)
-        df = stock.history(start=start_date.strftime('%Y-%m-%d'),
-                           end=end_date.strftime('%Y-%m-%d'))
+def build_dataset(tickers: list[str]) -> tuple[pd.DataFrame, pd.Series]:
+    """Download 2 years of OHLCV data and build (X, y) for training."""
+    end_date   = datetime.now()
+    start_date = end_date - timedelta(days=730)
+    all_X: list[pd.DataFrame] = []
+    all_y: list[pd.Series]    = []
 
-        if df.empty or len(df) < 2:
-            return None
-
-        open_price = df['Open'].iloc[0]
-        close_price = df['Close'].iloc[-1]
-        max_price = df['High'].max()
-
-        change_close = (close_price - open_price) / open_price
-        change_high = (max_price - open_price) / open_price
-
-        # תנאי הצלחה: עלייה של 3% בסגירה או זינוק של 5% במהלך היום
-        if change_close > 0.03 or change_high > 0.05:
-            return 1
-        return 0
-
-    except Exception as e:
-        return None
-
-def train_model():
-    print("🧠 Starting Training Process (Duplicates Filter Enabled)...")
-
-    raw_data = MongoDB.get_unlabeled_data()
-
-    if not raw_data:
-        print("📭 Database is empty or all items processed.")
-        return
-
-    print(f"📥 Found {len(raw_data)} items. Filtering duplicates & mature data...")
-
-    labeled_news = []
-    labels = []
-
-    # --- התיקון: זיכרון לכותרות שראינו כבר ---
-    seen_headlines = set()
-
-    processed_count = 0
-    skipped_count = 0
-    duplicates_count = 0 # מונה כפילויות
-
-    now = datetime.now(pytz.utc)
-
-    for item in raw_data:
-        ticker = item.get('ticker')
-        headline = item.get('headline')
-
-        # 1. סינון כפילויות מיידי
-        if headline in seen_headlines:
-            # מסמנים כטופל כדי שלא יופיע בפעם הבאה, אבל לא לומדים מזה שוב
-            MongoDB.mark_as_processed(item['_id'])
-            duplicates_count += 1
-            continue
-
-        # הוספה לזיכרון
-        seen_headlines.add(headline)
-
-        # המרת תאריך
-        news_date = item.get('news_date')
-        if isinstance(news_date, str):
-            try:
-                news_date = datetime.fromisoformat(news_date)
-            except:
-                MongoDB.mark_as_processed(item['_id'])
+    for ticker in tickers:
+        try:
+            df = yf.Ticker(ticker).history(
+                start=start_date.strftime("%Y-%m-%d"),
+                end=end_date.strftime("%Y-%m-%d"),
+            )
+            if df.empty or len(df) < MIN_ROWS_PER_TICKER:
+                logger.debug("Skipping %s — only %d rows", ticker, len(df))
                 continue
 
-        if news_date.tzinfo is None:
-            news_date = news_date.replace(tzinfo=pytz.utc)
+            df           = extract_features(df)
+            df           = add_sentiment_features(df, ticker)
+            df["label"]  = label_rows(df)
+            valid_mask   = df[FEATURE_COLS + ["label"]].notna().all(axis=1)
+            df           = df[valid_mask]
+            if len(df) < 30:
+                continue
 
-        # 2. האם עברו 3 ימים?
-        if (now - news_date).days < 3:
-            skipped_count += 1
-            continue
+            all_X.append(df[FEATURE_COLS])
+            all_y.append(df["label"])
+            logger.info("  %-6s  %d rows", ticker, len(df))
+        except Exception:
+            logger.warning("Failed to process %s", ticker, exc_info=True)
 
-        if not ticker or ticker == "GENERAL":
-            MongoDB.mark_as_processed(item['_id'])
-            continue
+    if not all_X:
+        raise ValueError("No training data collected. Check tickers and network.")
 
-        # 3. בדיקת מחיר
-        label = get_price_change(ticker, news_date)
+    return pd.concat(all_X, ignore_index=True), pd.concat(all_y, ignore_index=True)
 
-        if label is not None:
-            labeled_news.append(headline)
-            labels.append(label)
-            print(f"   ✅ Learned: {ticker} -> {label}") # ידפיס כל כותרת רק פעם אחת
-            processed_count += 1
-        else:
-            print(f"   ⚠️ No data for {ticker}, skipping.")
 
-        # סימון ב-DB
-        MongoDB.mark_as_processed(item['_id'])
+def train_xgb_model() -> None:
+    """Train and save XGBoost model predicting ≥5 % gain in 10 trading days."""
+    logger.info("=== XGBoost Price Model Training ===")
+    logger.info(
+        "Target: %.0f%% gain within %d trading days",
+        GAIN_THRESHOLD * 100,
+        FORWARD_DAYS,
+    )
 
-    print(f"\n📊 Summary:")
-    print(f"   - Original items: {len(raw_data)}")
-    print(f"   - Duplicates Removed: {duplicates_count}")
-    print(f"   - Too new (Skipped): {skipped_count}")
-    print(f"   - Successfully Trained: {processed_count}")
+    tickers = get_training_tickers()
+    logger.info("Training universe: %d tickers", len(tickers))
 
-    if len(labeled_news) < MIN_SAMPLES_TO_TRAIN:
-        print(f"⏳ Not enough unique data yet ({len(labeled_news)}/{MIN_SAMPLES_TO_TRAIN}).")
-        return
+    X, y = build_dataset(tickers)
 
-    print(f"🎓 Training model on {len(labeled_news)} unique samples...")
+    pos_count = int((y == 1).sum())
+    neg_count = int((y == 0).sum())
+    pos_rate  = pos_count / len(y) * 100
+    spw       = neg_count / pos_count if pos_count > 0 else 1.0
+    logger.info(
+        "Dataset: %d samples | Positive: %.1f%% | scale_pos_weight: %.2f",
+        len(y), pos_rate, spw,
+    )
 
-    vectorizer = TfidfVectorizer(stop_words='english', max_features=2000)
-    X = vectorizer.fit_transform(labeled_news)
-    y = labels
-
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model = xgb.XGBClassifier(
+        n_estimators=300,
+        max_depth=4,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        scale_pos_weight=spw,
+        eval_metric="logloss",
+        random_state=42,
+        verbosity=0,
+    )
     model.fit(X, y)
+    logger.info("Training complete.")
 
-    if not os.path.exists("app/models"):
-        os.makedirs("app/models")
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    joblib.dump({"model": model, "features": FEATURE_COLS}, XGB_MODEL_PATH)
+    logger.info("Model saved → %s", XGB_MODEL_PATH)
 
-    joblib.dump(model, MODEL_PATH)
-    joblib.dump(vectorizer, VECTORIZER_PATH)
+    sample = X.sample(min(10, len(X)), random_state=1)
+    probs  = model.predict_proba(sample)[:, 1]
+    logger.info("Sample confidence scores: %s", np.round(probs, 3))
 
-    print("🚀 Model successfully updated without duplicates!")
 
 if __name__ == "__main__":
-    train_model()
+    train_xgb_model()

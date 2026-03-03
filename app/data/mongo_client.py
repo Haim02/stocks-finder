@@ -1,185 +1,184 @@
-# from pymongo import MongoClient, UpdateOne
-# from app.core.config import settings
-# from datetime import datetime
-
-# class MongoDB:
-#     _client = None
-
-#     @classmethod
-#     def get_db(cls):
-#         if cls._client is None:
-#             cls._client = MongoClient(settings.MONGO_URI)
-#         return cls._client[settings.DB_NAME]
-
-#     @classmethod
-#     def save_news_event(cls, ticker, news_item):
-#         """שומר חדשה בודדת אם היא לא קיימת כבר"""
-#         db = cls.get_db()
-#         collection = db.news_events
-
-#         # אנחנו משתמשים ב-URL כמפתח ייחודי למניעת כפילויות
-#         collection.update_one(
-#             {'url': news_item['url']},
-#             {
-#                 '$setOnInsert': {
-#                     'ticker': ticker,
-#                     'headline': news_item['headline'],
-#                     'news_date': datetime.now(), # תאריך הסריקה
-#                     'processed_for_training': False # דגל לאימון עתידי
-#                 }
-#             },
-#             upsert=True
-#         )
-
-#     @classmethod
-#     def get_unlabeled_data(cls):
-#         """שליפת חדשות שעדיין לא אומנו"""
-#         db = cls.get_db()
-#         return list(db.news_events.find({'processed_for_training': False}))
-
-
-
-# from pymongo import MongoClient, UpdateOne
-# from app.core.config import settings
-# from datetime import datetime
-# import certifi  # <-- הוספנו את זה
-
-# class MongoDB:
-#     _client = None
-
-#     @classmethod
-#     def get_db(cls):
-#         if cls._client is None:
-#             # שימוש ב-certifi כדי לאמת את החיבור המאובטח (SSL/TLS)
-#             # זה פותר את שגיאת ה-Handshake
-#             cls._client = MongoClient(
-#                 settings.MONGO_URI,
-#                 tlsCAFile=certifi.where()
-#             )
-#         return cls._client[settings.DB_NAME]
-
-#     @classmethod
-#     def save_news_event(cls, ticker, news_item):
-#         """שומר חדשה בודדת אם היא לא קיימת כבר"""
-#         db = cls.get_db()
-#         collection = db.news_events
-
-#         # שימוש ב-URL כמפתח ייחודי למניעת כפילויות
-#         collection.update_one(
-#             {'url': news_item['url']},
-#             {
-#                 '$setOnInsert': {
-#                     'ticker': ticker,
-#                     'headline': news_item['headline'],
-#                     'news_date': datetime.now(),
-#                     'processed_for_training': False
-#                 }
-#             },
-#             upsert=True
-#         )
-
-#     @classmethod
-#     def get_unlabeled_data(cls):
-#         """שליפת חדשות שעדיין לא אומנו"""
-#         db = cls.get_db()
-#         return list(db.news_events.find({'processed_for_training': False}))
-
-
-#     @classmethod
-#     def mark_as_processed(cls, doc_id):
-#         """מסמן שהחדשה עברה תהליך אימון ולא צריך לשלוף אותה שוב"""
-#         db = cls.get_db()
-#         db.news_events.update_one(
-#             {'_id': doc_id},
-#             {'$set': {'processed_for_training': True}}
-#         )
-
-
-from pymongo import MongoClient, UpdateOne
-from app.core.config import settings
+import logging
 from datetime import datetime, timedelta
+
 import certifi
 import pytz
+from pymongo import MongoClient
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
 
 class MongoDB:
     _client = None
 
     @classmethod
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     def get_db(cls):
         if cls._client is None:
-            # חיבור מאובטח עם certifi
+            logger.info("Connecting to MongoDB...")
             cls._client = MongoClient(
                 settings.MONGO_URI,
-                tlsCAFile=certifi.where()
+                tlsCAFile=certifi.where(),
+                serverSelectionTimeoutMS=10_000,
+                connectTimeoutMS=10_000,
             )
         return cls._client[settings.DB_NAME]
 
     @classmethod
-    def save_news_event(cls, ticker, news_item):
-        """שומר חדשה בודדת אם היא לא קיימת כבר"""
-        db = cls.get_db()
-        collection = db.news_events
+    def save_news_event(cls, ticker: str, news_item: dict):
+        """Saves a news item (upsert by URL to prevent duplicates)."""
+        try:
+            db = cls.get_db()
+            raw_date = news_item.get("published_at") or news_item.get("raw_date")
+            if isinstance(raw_date, str):
+                try:
+                    dt_object = datetime.fromisoformat(raw_date)
+                except ValueError:
+                    dt_object = datetime.now(pytz.utc)
+            else:
+                dt_object = raw_date or datetime.now(pytz.utc)
 
-        # המרת תאריך לפורמט תקין
-        raw_date = news_item.get('published_at') or news_item.get('raw_date')
-        if isinstance(raw_date, str):
-            try:
-                dt_object = datetime.fromisoformat(raw_date)
-            except:
-                dt_object = datetime.now(pytz.utc)
-        else:
-            dt_object = raw_date
-
-        collection.update_one(
-            {'url': news_item['url']},
-            {
-                '$setOnInsert': {
-                    'ticker': ticker,
-                    'headline': news_item['headline'],
-                    'news_date': dt_object,
-                    'processed_for_training': False,
-                    'created_at': datetime.now(pytz.utc)
-                }
-            },
-            upsert=True
-        )
+            db.news_events.update_one(
+                {"url": news_item["url"]},
+                {
+                    "$setOnInsert": {
+                        "ticker": ticker,
+                        "headline": news_item["headline"],
+                        "news_date": dt_object,
+                        "processed_for_training": False,
+                        "created_at": datetime.now(pytz.utc),
+                    }
+                },
+                upsert=True,
+            )
+        except Exception:
+            logger.exception("Failed to save news event for %s", ticker)
 
     @classmethod
-    def get_unlabeled_data(cls):
-        """שליפת חדשות שעדיין לא אומנו"""
-        db = cls.get_db()
-        return list(db.news_events.find({'processed_for_training': False}))
+    def get_unlabeled_data(cls) -> list:
+        """Returns news events not yet used for training."""
+        try:
+            db = cls.get_db()
+            return list(db.news_events.find({"processed_for_training": False}))
+        except Exception:
+            logger.exception("Failed to fetch unlabeled data")
+            return []
 
     @classmethod
     def mark_as_processed(cls, doc_id):
-        """מסמן שהחדשה עברה תהליך אימון"""
-        db = cls.get_db()
-        db.news_events.update_one(
-            {'_id': doc_id},
-            {'$set': {'processed_for_training': True}}
-        )
+        """Marks a news event as used for training."""
+        try:
+            db = cls.get_db()
+            db.news_events.update_one(
+                {"_id": doc_id}, {"$set": {"processed_for_training": True}}
+            )
+        except Exception:
+            logger.exception("Failed to mark doc %s as processed", doc_id)
 
-    # --- תוספת חדשה: מנגנון הצינון (Spam Filter) ---
-
-    @classmethod
-    def log_sent_alert(cls, ticker, reason):
-        """מתעד שמניה נשלחה במייל"""
-        db = cls.get_db()
-        db.sent_alerts.insert_one({
-            "ticker": ticker,
-            "reason": reason, # 'News' or 'Technical'
-            "sent_at": datetime.now(pytz.utc)
-        })
+    # --- Spam Filter (Cooldown) ---
 
     @classmethod
-    def was_sent_recently(cls, ticker, days=3):
-        """בודק אם המניה נשלחה במייל ב-X הימים האחרונים"""
-        db = cls.get_db()
-        cutoff_date = datetime.now(pytz.utc) - timedelta(days=days)
+    def log_sent_alert(cls, ticker: str, reason: str):
+        """Records that a ticker was included in an email alert."""
+        try:
+            db = cls.get_db()
+            db.sent_alerts.insert_one(
+                {
+                    "ticker": ticker,
+                    "reason": reason,
+                    "sent_at": datetime.now(pytz.utc),
+                }
+            )
+        except Exception:
+            logger.exception("Failed to log sent alert for %s", ticker)
 
-        count = db.sent_alerts.count_documents({
-            "ticker": ticker,
-            "sent_at": {"$gte": cutoff_date}
-        })
+    @classmethod
+    def was_sent_recently(cls, ticker: str, days: int = 3) -> bool:
+        """Returns True if this ticker was alerted within the last `days` days."""
+        try:
+            db = cls.get_db()
+            cutoff = datetime.now(pytz.utc) - timedelta(days=days)
+            return (
+                db.sent_alerts.count_documents(
+                    {"ticker": ticker, "sent_at": {"$gte": cutoff}}
+                )
+                > 0
+            )
+        except Exception:
+            logger.exception("Failed to check sent_recently for %s", ticker)
+            return False
 
-        return count > 0
+    # --- Market Intelligence / Daily Sentiment ---
+
+    @classmethod
+    def save_daily_sentiment(cls, doc: dict):
+        """
+        Upserts one sentiment record per (ticker, date).
+        Collection: daily_market_sentiment
+        """
+        try:
+            db = cls.get_db()
+            db.daily_market_sentiment.update_one(
+                {"ticker": doc["ticker"], "date": doc["date"]},
+                {"$set": doc},
+                upsert=True,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to save daily sentiment for %s", doc.get("ticker")
+            )
+
+    @classmethod
+    def get_sentiment_history(cls, ticker: str, days: int = 730) -> list[dict]:
+        """
+        Returns sentiment records for the last `days` days for a ticker,
+        sorted ascending by date. Fields: date, sentiment_score,
+        key_event_type, impact_duration.
+        """
+        try:
+            from datetime import date as _date, timedelta
+            cutoff = (_date.today() - timedelta(days=days)).strftime("%Y-%m-%d")
+            db = cls.get_db()
+            return list(
+                db.daily_market_sentiment.find(
+                    {"ticker": ticker.upper(), "date": {"$gte": cutoff}},
+                    {
+                        "_id": 0,
+                        "date": 1,
+                        "sentiment_score": 1,
+                        "key_event_type": 1,
+                        "impact_duration": 1,
+                    },
+                ).sort("date", 1)
+            )
+        except Exception:
+            logger.exception(
+                "Failed to fetch sentiment history for %s", ticker
+            )
+            return []
+
+    @classmethod
+    def save_institutional_pick(cls, pick_data: dict):
+        """Saves a stock that passed the Smart Money filter (upsert per day)."""
+        try:
+            db = cls.get_db()
+            pick_id = f"{pick_data['ticker']}_{datetime.now(pytz.utc).strftime('%Y-%m-%d')}"
+            document = {
+                "ticker": pick_data["ticker"],
+                "score": pick_data["score"],
+                "reasons": pick_data["reasons"],
+                "fundamental_strength": pick_data["fundamentals"],
+                "technical_setup": pick_data["technicals"],
+                "dark_pool_link": f"https://stockgrid.io/darkpools/{pick_data['ticker']}",
+                "created_at": datetime.now(pytz.utc),
+            }
+            db.institutional_picks.update_one(
+                {"_id": pick_id}, {"$set": document}, upsert=True
+            )
+        except Exception:
+            logger.exception(
+                "Failed to save institutional pick for %s", pick_data.get("ticker")
+            )
