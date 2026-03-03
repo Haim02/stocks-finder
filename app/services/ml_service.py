@@ -123,15 +123,15 @@ def add_sentiment_features(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
             r["date"]: float(r["sentiment_score"]) for r in records
         }
 
-        # Map df DatetimeIndex to YYYY-MM-DD strings and look up scores
+        if not score_by_date:
+            return df
+
+        # Map each row's date to its score — .get() returns None for missing dates
         date_strs = df.index.strftime("%Y-%m-%d")
-        scores    = pd.array([score_by_date.get(d) for d in date_strs], dtype=object)
-        has_data  = pd.array([d in score_by_date for d in date_strs], dtype=bool)
+        df["sent_score"]    = [score_by_date.get(d, 5.0) for d in date_strs]
+        df["sent_has_data"] = [1.0 if d in score_by_date else 0.0 for d in date_strs]
 
-        df.loc[has_data, "sent_score"]    = [score_by_date[d] for d in date_strs[has_data]]
-        df.loc[has_data, "sent_has_data"] = 1.0
-
-        n_matched = int(has_data.sum())
+        n_matched = int(df["sent_has_data"].sum())
         if n_matched:
             logger.debug(
                 "Sentiment: %s — %d / %d rows matched", ticker, n_matched, len(df)
