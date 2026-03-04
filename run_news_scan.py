@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 # --- Configure your scan source here ---
 # Option A: Finviz (active)
 # SCAN_URL = "https://finviz.com/screener.ashx?v=211&f=sh_avgvol_o500,sh_curvol_o500,sh_relvol_o1,sh_short_o5,ta_beta_o1.5,ta_perf_dup,ta_rsi_nos50,ta_sma20_pa&ft=4"
-SCAN_URL = "https://finviz.com/screener.ashx?v=211&f=sh_avgvol_o400,sh_relvol_o1,sh_short_o5,ta_rsi_nos50,ta_sma50_pc&ft=4"
+# SCAN_URL = "https://finviz.com/screener.ashx?v=211&f=sh_avgvol_o400,sh_relvol_o1,sh_short_o5,ta_rsi_nos50,ta_sma50_pc&ft=4"
 # SCAN_URL = "https://finviz.com/screener.ashx?v=211&f=sh_avgvol_o400,sh_relvol_o1,sh_short_o5,ta_rsi_nos50&ft=4"
 # SCAN_URL = (
 #     "https://finviz.com/screener.ashx?v=211"
@@ -48,8 +48,9 @@ SCAN_URL = "https://finviz.com/screener.ashx?v=211&f=sh_avgvol_o400,sh_relvol_o1
 #     "sh_short_o5,ta_beta_o1.5,ta_perf_dup,ta_rsi_nos50,ta_sma20_pa,ta_sma50_pa"
 #     "&ft=4"
 # )
+# SCAN_URL = "https://finviz.com/screener.ashx?v=211&f=sh_avgvol_o500,sh_curvol_o500,sh_relvol_o1,sh_short_o5,ta_beta_o1.5,ta_perf_dup,ta_rsi_nos50&ft=4"
 # Option B: TradingView (uncomment and replace SCAN_URL above)
-# SCAN_URL = "https://www.tradingview.com/screener/BmHEGvNM/"
+SCAN_URL = "https://www.tradingview.com/screener/BmHEGvNM/"
 
 NEWS_SCORE_THRESHOLD = 50
 NEWS_FRESHNESS_DAYS = 3
@@ -73,14 +74,20 @@ def run_hybrid_scan():
     target_tickers: set[str] = set()
 
     if "tradingview.com" in SCAN_URL:
-        logger.info("Source: TradingView (Selenium)")
+        logger.info("Source: TradingView (Selenium) — extracting tickers only, news from Finviz")
         tickers = TradingViewService.get_candidates_from_url(SCAN_URL)
+        if tickers:
+            logger.info(
+                "Found %d tickers from TradingView, now fetching news from Finviz...",
+                len(tickers),
+            )
     else:
         logger.info("Source: Finviz")
         tickers = ScreenerService.get_candidates_from_url(SCAN_URL)
+        if tickers:
+            logger.info("Candidates found: %d", len(tickers))
 
     if tickers:
-        logger.info("Candidates found: %d", len(tickers))
         target_tickers.update(tickers)
 
     # Add biotech / FDA tickers from RSS
