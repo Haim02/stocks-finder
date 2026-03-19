@@ -2,9 +2,10 @@
 Telegram Bot — Mobile interface for the Autonomous Trading Agent.
 
 Commands:
-    /scan    — Start a full agent run (background thread)
-    /status  — VIX + market conditions snapshot
-    /options — Latest 0DTE SPX iron condor setup
+    /scan           — Start a full agent run (background thread)
+    /status         — VIX + market conditions snapshot
+    /options        — Latest 0DTE SPX iron condor setup
+    /analyze TICKER — Deep Dive research report (email + Telegram summary)
 
 Notifications:
     Call notify_trade(text) from anywhere in the codebase to push
@@ -67,7 +68,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "פקודות זמינות:\n"
         "/status — בדיקת שוק (VIX + מאקרו)\n"
         "/options — הגדרת ספרד 0DTE SPX להיום\n"
-        "/scan — הפעל סריקה מלאה של הסוכן (ברקע)\n",
+        "/scan — הפעל סריקה מלאה של הסוכן (ברקע)\n"
+        "/analyze TICKER — ניתוח עמוק למניה ספציפית\n"
+        "   _דוגמה: /analyze AAPL_\n",
         parse_mode=ParseMode.MARKDOWN,
     )
 
@@ -205,6 +208,88 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     threading.Thread(target=_run_in_thread, daemon=True, name="agent-scan").start()
 
 
+async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /analyze TICKER — runs a Deep Dive analysis in a background thread.
+
+    Flow:
+      1. Immediate reply: "Starting deep dive on {TICKER}..."
+      2. Background thread:
+           a. AnalysisService.analyze(ticker)        — collect all data
+           b. AIService.get_deep_dive_analysis()     — Goldman Sachs note
+           c. EmailService.send_deep_dive_report()   — HTML email via Resend
+           d. notify_trade(summary)                  — short Telegram message
+    """
+    if not _is_authorized(update):
+        return
+
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "⚠️ נא לציין טיקר\\.  דוגמה: `/analyze AAPL`",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return
+
+    ticker = args[0].upper().strip()
+
+    # Validate: basic ticker format
+    if not ticker.isalpha() or len(ticker) > 10:
+        await update.message.reply_text(f"⚠️ טיקר לא תקין: `{ticker}`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    await update.message.reply_text(
+        f"🔬 *מתחיל ניתוח עמוק על {ticker}...*\n\n"
+        f"אאסוף נתונים פונדמנטליים, טכניים וחדשות.\n"
+        f"הדוח המלא יישלח במייל ✉️ ואני אשלח לך סיכום כאן בסיום.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+    def _run_deep_dive():
+        try:
+            from app.services.analysis_service import AnalysisService
+            from app.services.ai_service import AIService
+            from app.services.email_service import EmailService
+
+            # 1. Collect all data
+            logger.info("[Telegram] Deep dive started: %s", ticker)
+            data = AnalysisService().analyze(ticker)
+
+            # 2. AI Goldman Sachs analysis
+            ai_result = AIService().get_deep_dive_analysis(ticker, data)
+
+            # 3. Email the full HTML report
+            EmailService.send_deep_dive_report(data, ai_result)
+
+            # 4. Send short Telegram summary
+            score  = ai_result.get("score", 0)
+            rec    = ai_result.get("recommendation", "HOLD")
+            price  = data.get("current_price", "N/A")
+            rsi    = data.get("rsi", "N/A")
+            trend  = data.get("trend_status", "")
+
+            emoji = "🟢" if rec == "BUY" else "🔴" if rec == "SELL" else "🟡"
+            summary = (
+                f"{emoji} *{ticker} — Deep Dive הושלם*\n\n"
+                f"💰 מחיר: `${price}`\n"
+                f"📊 RSI: `{rsi}` | {trend}\n"
+                f"🎯 המלצה: *{rec}* | ציון: `{score}/100`\n\n"
+                f"📧 הדוח המלא נשלח למייל שלך."
+            )
+            notify_trade(summary)
+            logger.info("[Telegram] Deep dive complete: %s score=%d rec=%s", ticker, score, rec)
+
+        except Exception as exc:
+            logger.exception("[Telegram] Deep dive failed for %s", ticker)
+            notify_trade(f"❌ *ניתוח עמוק נכשל עבור {ticker}*\n\n`{exc}`")
+
+    threading.Thread(
+        target=_run_deep_dive,
+        daemon=True,
+        name=f"deep-dive-{ticker}",
+    ).start()
+
+
 def _get_event_loop():
     import asyncio
     try:
@@ -264,6 +349,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("status",  cmd_status))
     app.add_handler(CommandHandler("options", cmd_options))
     app.add_handler(CommandHandler("scan",    cmd_scan))
+    app.add_handler(CommandHandler("analyze", cmd_analyze))
     _app = app
     return app
 

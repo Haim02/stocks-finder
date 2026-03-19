@@ -2441,3 +2441,336 @@ class EmailService:
             print(f"✅ Daily Options Brief sent (VIX={vix}, stocks={len(stocks)}).")
         except Exception as e:
             print(f"❌ Options email send error: {e}")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Deep Dive Report — on-demand single-ticker research note
+    # ──────────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def send_deep_dive_report(
+        data: dict,
+        ai_result: dict,
+        to_email: str | None = None,
+    ) -> None:
+        """
+        Send a professional Deep Dive research report for a single ticker.
+
+        Args:
+            data      : merged dict from AnalysisService.analyze()
+            ai_result : dict with 'full_analysis', 'score', 'recommendation'
+            to_email  : override recipient (default: settings.ALERT_TO_EMAIL)
+        """
+        ticker     = data.get("ticker", "?")
+        price      = data.get("current_price", "N/A")
+        mkt_cap    = data.get("market_cap", 0) or 0
+        rsi        = data.get("rsi", "N/A")
+        sma50      = data.get("sma50", "N/A")
+        sma200     = data.get("sma200", "N/A")
+        w52_low    = data.get("week_52_low", "N/A")
+        w52_high   = data.get("week_52_high", "N/A")
+        dte        = data.get("debt_to_equity", "N/A")
+        curr_ratio = data.get("current_ratio", "N/A")
+        pe         = data.get("pe_ratio", "N/A")
+        short_pct  = data.get("short_pct_float", "N/A")
+        inst_pct   = data.get("inst_pct_held", "N/A")
+        news       = data.get("news", [])
+        timestamp  = data.get("timestamp", "")[:10]
+
+        score      = ai_result.get("score", 0)
+        rec        = ai_result.get("recommendation", "HOLD")
+        analysis   = ai_result.get("full_analysis", "")
+
+        # ── Colour scheme ──────────────────────────────────────────────────
+        NAVY   = "#1e3a5f"
+        WHITE  = "#ffffff"
+        LIGHT  = "#f4f6f9"
+        BORDER = "#dde3ed"
+
+        rec_color = {"BUY": "#15803d", "SELL": "#dc2626"}.get(rec, "#b45309")
+        rec_bg    = {"BUY": "#dcfce7", "SELL": "#fee2e2"}.get(rec, "#fef9c3")
+
+        score_color = (
+            "#15803d" if score >= 70
+            else "#dc2626" if score <= 40
+            else "#b45309"
+        )
+
+        def _fmt_cap(v):
+            try:
+                v = float(v)
+                return f"${v/1e9:.1f}B" if v >= 1e9 else f"${v/1e6:.0f}M"
+            except Exception:
+                return "N/A"
+
+        def _news_rows():
+            if not news:
+                return "<li style='color:#6b7280;'>No recent headlines found.</li>"
+            rows = ""
+            for n in news[:5]:
+                h = n.get("headline", "")
+                s = n.get("source", "")
+                dt = ""
+                pub = n.get("published_at")
+                if pub:
+                    try:
+                        dt = pub.strftime("%b %d") if hasattr(pub, "strftime") else str(pub)[:10]
+                    except Exception:
+                        pass
+                rows += (
+                    f"<li style='margin-bottom:8px;padding-bottom:8px;"
+                    f"border-bottom:1px solid {BORDER};'>"
+                    f"<span style='color:#374151;font-size:13px;'>{h}</span>"
+                    f"<span style='color:#9ca3af;font-size:11px;margin-right:8px;'>"
+                    f" — {s} {dt}</span></li>"
+                )
+            return rows
+
+        def _analysis_html():
+            """Convert the markdown-like analysis to simple HTML paragraphs."""
+            if not analysis:
+                return "<p>ניתוח לא זמין.</p>"
+            html_out = ""
+            for line in analysis.split("\n"):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if stripped.startswith("## "):
+                    html_out += (
+                        f"<h3 style='color:{NAVY};font-size:16px;margin:20px 0 8px;"
+                        f"padding-bottom:6px;border-bottom:2px solid {BORDER};'>"
+                        f"{stripped[3:]}</h3>"
+                    )
+                elif stripped.startswith("| "):
+                    # Table row
+                    cells = [c.strip() for c in stripped.split("|")[1:-1]]
+                    if all(set(c) <= set("-: ") for c in cells):
+                        continue  # skip separator row
+                    html_out += "<tr>"
+                    for i, c in enumerate(cells):
+                        bg = LIGHT if i == 0 else WHITE
+                        html_out += (
+                            f"<td style='padding:8px 12px;border:1px solid {BORDER};"
+                            f"font-size:13px;background:{bg};'>{c}</td>"
+                        )
+                    html_out += "</tr>"
+                elif stripped.startswith("**") and stripped.endswith("**"):
+                    html_out += (
+                        f"<p style='font-weight:bold;color:{NAVY};margin:10px 0 4px;'>"
+                        f"{stripped[2:-2]}</p>"
+                    )
+                else:
+                    # Replace inline **bold**
+                    import re as _re
+                    line_html = _re.sub(
+                        r"\*\*(.+?)\*\*",
+                        r"<strong>\1</strong>",
+                        stripped,
+                    )
+                    html_out += (
+                        f"<p style='color:#374151;font-size:14px;line-height:1.7;"
+                        f"margin:4px 0;'>{line_html}</p>"
+                    )
+            return html_out
+
+        # Wrap table rows in a <table> tag
+        import re as _re
+        analysis_html = _analysis_html()
+        analysis_html = _re.sub(
+            r"(<tr>.*?</tr>)+",
+            lambda m: (
+                f"<table style='width:100%;border-collapse:collapse;"
+                f"margin:12px 0;font-size:13px;'>{m.group(0)}</table>"
+            ),
+            analysis_html,
+            flags=_re.DOTALL,
+        )
+
+        html = f"""<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Deep Dive — {ticker}</title>
+</head>
+<body style="margin:0;padding:0;background:{LIGHT};font-family:'Segoe UI',Arial,sans-serif;direction:rtl;">
+
+<!-- Wrapper -->
+<table width="100%" cellpadding="0" cellspacing="0" style="background:{LIGHT};padding:24px 0;">
+<tr><td align="center">
+<table width="660" cellpadding="0" cellspacing="0" style="background:{WHITE};border-radius:8px;
+  overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
+
+  <!-- ── HEADER BAND ─────────────────────────────────────────────────── -->
+  <tr>
+    <td style="background:{NAVY};padding:28px 32px;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td>
+            <p style="margin:0;color:rgba(255,255,255,0.65);font-size:12px;letter-spacing:2px;
+               text-transform:uppercase;">Goldman Sachs Style Deep Dive</p>
+            <h1 style="margin:6px 0 0;color:{WHITE};font-size:32px;font-weight:700;">
+              {ticker}</h1>
+            <p style="margin:4px 0 0;color:rgba(255,255,255,0.75);font-size:14px;">
+              {timestamp} &nbsp;|&nbsp; מחיר: <strong>${price}</strong>
+              &nbsp;|&nbsp; שווי שוק: <strong>{_fmt_cap(mkt_cap)}</strong>
+            </p>
+          </td>
+          <td align="left" style="vertical-align:top;">
+            <!-- Score badge -->
+            <div style="background:rgba(255,255,255,0.12);border-radius:8px;
+              padding:14px 20px;text-align:center;display:inline-block;">
+              <p style="margin:0;color:rgba(255,255,255,0.7);font-size:11px;">SCORE</p>
+              <p style="margin:2px 0;color:{WHITE};font-size:34px;font-weight:800;
+                line-height:1;">{score}</p>
+              <p style="margin:0;color:rgba(255,255,255,0.7);font-size:11px;">/ 100</p>
+            </div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- ── RECOMMENDATION BANNER ─────────────────────────────────────── -->
+  <tr>
+    <td style="background:{rec_bg};padding:16px 32px;border-bottom:3px solid {rec_color};">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td>
+            <span style="font-size:22px;font-weight:800;color:{rec_color};">
+              ● {rec}</span>
+            <span style="font-size:14px;color:#6b7280;margin-right:12px;">
+              — המלצת אנליסט</span>
+          </td>
+          <td align="left">
+            <span style="font-size:13px;color:#6b7280;">52W: ${w52_low} – ${w52_high}</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- ── KPI CARDS ROW ─────────────────────────────────────────────── -->
+  <tr>
+    <td style="padding:24px 32px 8px;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <!-- RSI -->
+          <td width="33%" style="padding:0 8px 0 0;">
+            <div style="background:{LIGHT};border-radius:6px;padding:14px 16px;
+              border-right:4px solid {NAVY};">
+              <p style="margin:0;font-size:11px;color:#9ca3af;text-transform:uppercase;
+                letter-spacing:1px;">RSI (14)</p>
+              <p style="margin:4px 0 0;font-size:24px;font-weight:700;color:{NAVY};">
+                {rsi}</p>
+              <p style="margin:2px 0 0;font-size:11px;color:#6b7280;">
+                {'⚠️ קנוי יתר' if isinstance(rsi, (int,float)) and float(rsi)>70
+                 else '⚠️ מכור יתר' if isinstance(rsi, (int,float)) and float(rsi)<30
+                 else '✅ נייטרלי'}</p>
+            </div>
+          </td>
+          <!-- SMA -->
+          <td width="33%" style="padding:0 4px;">
+            <div style="background:{LIGHT};border-radius:6px;padding:14px 16px;
+              border-right:4px solid #0ea5e9;">
+              <p style="margin:0;font-size:11px;color:#9ca3af;text-transform:uppercase;
+                letter-spacing:1px;">SMA 50 / 200</p>
+              <p style="margin:4px 0 0;font-size:16px;font-weight:700;color:{NAVY};">
+                ${sma50}</p>
+              <p style="margin:2px 0 0;font-size:13px;color:#6b7280;">
+                200d: ${sma200}</p>
+            </div>
+          </td>
+          <!-- Fundamentals -->
+          <td width="33%" style="padding:0 0 0 8px;">
+            <div style="background:{LIGHT};border-radius:6px;padding:14px 16px;
+              border-right:4px solid #8b5cf6;">
+              <p style="margin:0;font-size:11px;color:#9ca3af;text-transform:uppercase;
+                letter-spacing:1px;">P/E | D/E</p>
+              <p style="margin:4px 0 0;font-size:16px;font-weight:700;color:{NAVY};">
+                {pe} | {dte}</p>
+              <p style="margin:2px 0 0;font-size:13px;color:#6b7280;">
+                Current Ratio: {curr_ratio}</p>
+            </div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- ── INSTITUTIONAL ROW ─────────────────────────────────────────── -->
+  <tr>
+    <td style="padding:8px 32px 20px;">
+      <table width="100%" cellpadding="0" cellspacing="0"
+        style="background:{LIGHT};border-radius:6px;padding:12px 16px;">
+        <tr>
+          <td style="padding:8px 16px;border-left:1px solid {BORDER};">
+            <p style="margin:0;font-size:11px;color:#9ca3af;">SHORT % FLOAT</p>
+            <p style="margin:4px 0 0;font-size:16px;font-weight:700;color:{NAVY};">
+              {short_pct}%</p>
+          </td>
+          <td style="padding:8px 16px;border-left:1px solid {BORDER};">
+            <p style="margin:0;font-size:11px;color:#9ca3af;">INST. OWNED</p>
+            <p style="margin:4px 0 0;font-size:16px;font-weight:700;color:{NAVY};">
+              {inst_pct}%</p>
+          </td>
+          <td style="padding:8px 16px;">
+            <p style="margin:0;font-size:11px;color:#9ca3af;">SQUEEZE RISK</p>
+            <p style="margin:4px 0 0;font-size:16px;font-weight:700;color:{NAVY};">
+              {data.get("short_squeeze_risk","N/A")}</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- ── AI ANALYSIS ───────────────────────────────────────────────── -->
+  <tr>
+    <td style="padding:0 32px 24px;">
+      <h2 style="color:{NAVY};font-size:18px;margin:0 0 16px;padding-bottom:8px;
+        border-bottom:2px solid {NAVY};">ניתוח אנליסט — Goldman Sachs Style</h2>
+      <div style="font-size:14px;line-height:1.75;color:#374151;">
+        {analysis_html}
+      </div>
+    </td>
+  </tr>
+
+  <!-- ── NEWS HEADLINES ────────────────────────────────────────────── -->
+  <tr>
+    <td style="padding:0 32px 24px;">
+      <h2 style="color:{NAVY};font-size:18px;margin:0 0 16px;padding-bottom:8px;
+        border-bottom:2px solid {BORDER};">📰 חדשות אחרונות</h2>
+      <ul style="margin:0;padding:0;list-style:none;">
+        {_news_rows()}
+      </ul>
+    </td>
+  </tr>
+
+  <!-- ── FOOTER ────────────────────────────────────────────────────── -->
+  <tr>
+    <td style="background:{NAVY};padding:16px 32px;">
+      <p style="margin:0;color:rgba(255,255,255,0.5);font-size:11px;text-align:center;">
+        {ticker} Deep Dive — Generated {timestamp} &nbsp;|&nbsp;
+        Not investment advice. Manage your own risk.
+      </p>
+    </td>
+  </tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
+
+        subject = f"🔬 Deep Dive: {ticker} — {rec} | Score {score}/100"
+        recipient = to_email or settings.ALERT_TO_EMAIL
+
+        try:
+            resend.Emails.send({
+                "from":    settings.FROM_EMAIL,
+                "to":      [recipient],
+                "subject": subject,
+                "html":    html,
+            })
+            logger.info("Deep Dive report sent: %s → %s (score=%d rec=%s)", ticker, recipient, score, rec)
+        except Exception as exc:
+            logger.exception("Deep Dive email send failed for %s: %s", ticker, exc)

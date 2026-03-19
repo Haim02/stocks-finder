@@ -363,6 +363,131 @@ For each ticker cover ALL of the following:
 Output ONLY the Hebrew analysis — no markdown code blocks, no English headers."""
 
 
+def _build_deep_dive_prompt(ticker: str, data: dict) -> str:
+    """
+    Goldman Sachs Senior Equity Research Analyst deep-dive prompt.
+    Consumes the merged dict from AnalysisService.analyze().
+    """
+    price    = data.get("current_price", "N/A")
+    mkt_cap  = _fmt_fin(data.get("market_cap", 0) or 0)
+    desc     = (data.get("description", "") or "")[:500]
+
+    # Technical
+    rsi       = data.get("rsi", "N/A")
+    sma50     = data.get("sma50", "N/A")
+    sma200    = data.get("sma200", "N/A")
+    macd      = data.get("macd", "N/A")
+    macd_sig  = data.get("macd_signal", "N/A")
+    macd_hist = data.get("macd_histogram", "N/A")
+    w52_low   = data.get("week_52_low", "N/A")
+    w52_high  = data.get("week_52_high", "N/A")
+    trend     = data.get("trend_status", "N/A")
+    tech_sig  = data.get("technical_signal", "N/A")
+
+    # Fundamentals
+    dte        = data.get("debt_to_equity", "N/A")
+    curr_ratio = data.get("current_ratio",  "N/A")
+    pe         = data.get("pe_ratio",  "N/A")
+    peg        = data.get("peg_ratio", "N/A")
+    gm_str     = _fmt_margins(data.get("gross_margin_5y", []))
+    nm_str     = _fmt_margins(data.get("net_margin_5y",   []))
+    fcf_list   = data.get("fcf_history", [])
+    fcf_str    = " → ".join(_fmt_fin(v) for v in fcf_list[:3]) if fcf_list else "N/A"
+
+    # Institutional
+    short_pct    = data.get("short_pct_float",    "N/A")
+    inst_pct     = data.get("inst_pct_held",      "N/A")
+    squeeze_risk = data.get("short_squeeze_risk", "N/A")
+    last_filing  = data.get("last_filing",        "N/A")
+
+    # News
+    news     = data.get("news", [])
+    news_str = "\n".join(f"• {n['headline']}" for n in news[:5]) if news else "No recent news"
+
+    # MongoDB history
+    history     = data.get("sentiment_history", [])
+    history_str = (
+        "No previous scores in database"
+        if not history
+        else " | ".join(
+            f"{h.get('date', '?')}: {h.get('sentiment_score', '?')}"
+            for h in history[-3:]
+        )
+    )
+
+    return f"""You are a Senior Equity Research Analyst at Goldman Sachs with 20 years of experience \
+covering global equities. Produce a comprehensive deep-dive research note on {ticker} in professional Hebrew.
+This is an on-demand analysis requested directly by the portfolio manager.
+
+╔══════════════════════════════════════════╗
+║  {ticker} — DEEP DIVE ANALYSIS REQUEST  ║
+╚══════════════════════════════════════════╝
+
+COMPANY OVERVIEW:
+{desc or 'No description available.'}
+
+MARKET DATA:
+Price: ${price} | Market Cap: {mkt_cap} | 52W Range: ${w52_low} – ${w52_high}
+
+TECHNICAL INDICATORS:
+RSI(14): {rsi} | SMA50: ${sma50} | SMA200: ${sma200}
+MACD Line: {macd} | Signal: {macd_sig} | Histogram: {macd_hist}
+Trend: {trend} | Signal: {tech_sig}
+
+FUNDAMENTAL DATA:
+P/E: {pe} | PEG: {peg}
+Gross Margin (5yr newest→oldest): {gm_str}
+Net Margin (5yr newest→oldest):   {nm_str}
+FCF (3yr newest→oldest): {fcf_str}
+Debt/Equity: {dte} | Current Ratio: {curr_ratio}
+
+INSTITUTIONAL & SHORT DATA:
+Short % Float: {short_pct}% | Institutions: {inst_pct}% | Squeeze Risk: {squeeze_risk}
+Last SEC Filing: {last_filing}
+
+RECENT NEWS (latest 5 headlines):
+{news_str}
+
+HISTORICAL CONTEXT (MongoDB sentiment scores):
+{history_str}
+
+════════════ OUTPUT — EXACT FORMAT REQUIRED ════════════
+Write ONLY in Hebrew. Use the exact section headers below. No English.
+
+## רקע עסקי
+[2 sentences: what the company does and its core value proposition]
+
+## ניתוח פונדמנטלי
+**בריאות המאזן:** [D/E {dte}, Current Ratio {curr_ratio}, cash vs debt — 2-3 sentences]
+**רווחיות:** [Gross/Net margin trends — expanding or contracting? FCF quality?]
+**הערכת שווי:** [P/E {pe} and PEG {peg} vs sector — cheap, fair, or expensive?]
+
+## ניתוח טכני
+**RSI({rsi}):** [Overbought >70 / Oversold <30 / Neutral — what does it imply for the next move?]
+**MACD:** [Line {macd} vs Signal {macd_sig} — bullish or bearish crossover? Histogram direction?]
+**ממוצעים נעים:** [Price ${price} vs SMA50 ${sma50} and SMA200 ${sma200} — above/below? Cross forming?]
+**רמות מפתח:** [Support and resistance based on 52W range ${w52_low}–${w52_high} and SMA levels]
+
+## חדשות וקטליזטורים
+[Analyze the headlines above. Any material catalyst? Upcoming events? Sector or macro tailwinds?]
+
+## ציון ומסקנה
+**ציון: [NUMBER 1-100]/100**
+**המלצה: [BUY / SELL / HOLD]** | רמת ביטחון: **[גבוה / בינוני / נמוך]**
+[2-sentence investment thesis — why this rating, what is the key risk to the thesis]
+
+## פרמטרי עסקה
+| פרמטר | מחיר | הסבר |
+|--------|-------|-------|
+| מחיר כניסה | $[X] | [current level or pullback entry] |
+| סטופ לוס | $[X] | [below key support or SMA, ~X% risk] |
+| יעד שמרני | $[X] | [next resistance / +10-15%] |
+| יעד אופטימי | $[X] | [full upside target / +20-30%] |
+| יחס סיכוי/סיכון | [X]:1 | |
+
+Output ONLY the Hebrew analysis in the format above — no markdown code blocks, no English."""
+
+
 class AIService:
     """OpenAI-based analysis for swing trading (Hebrew output)."""
 
@@ -450,6 +575,68 @@ class AIService:
             return {
                 "spx_analysis":   "שגיאה בניתוח 0DTE.",
                 "stock_analysis": "שגיאה בניתוח מניות.",
+            }
+
+    def get_deep_dive_analysis(self, ticker: str, data: dict) -> dict:
+        """
+        Goldman Sachs deep-dive persona.
+        Receives merged data from AnalysisService.analyze() and returns:
+          - 'full_analysis' : full Hebrew markdown research note
+          - 'score'         : int 1-100 extracted from output
+          - 'recommendation': BUY / SELL / HOLD extracted from output
+        """
+        if not self.client:
+            return {
+                "full_analysis":  "שירות AI לא מוגדר — נא להגדיר OPENAI_API_KEY.",
+                "score":          0,
+                "recommendation": "HOLD",
+            }
+
+        prompt = _build_deep_dive_prompt(ticker, data)
+
+        try:
+            content = self._call_api(
+                model=FULL_REPORT_MODEL,   # gpt-4o for deep analysis
+                messages=[
+                    {
+                        "role":    "system",
+                        "content": (
+                            "You are a Goldman Sachs Senior Equity Research Analyst. "
+                            "Write comprehensive, data-driven research notes in Hebrew."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=2000,
+                temperature=0.5,
+            )
+
+            # Extract score and recommendation from the text
+            import re
+            score          = 50
+            recommendation = "HOLD"
+
+            score_match = re.search(r"ציון[:\s]*(\d{1,3})\s*/\s*100", content)
+            if score_match:
+                score = min(100, max(1, int(score_match.group(1))))
+
+            if "BUY" in content.upper():
+                recommendation = "BUY"
+            elif "SELL" in content.upper():
+                recommendation = "SELL"
+
+            return {
+                "full_analysis":  content.strip(),
+                "score":          score,
+                "recommendation": recommendation,
+            }
+
+        except Exception:
+            logger.exception("Deep dive analysis failed for %s", ticker)
+            return {
+                "full_analysis":  "אירעה תקלה בניתוח העמוק. אנא בדוק את הלוגים.",
+                "score":          0,
+                "recommendation": "HOLD",
             }
 
     def analyze_stock_full_report(
