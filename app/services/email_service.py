@@ -1826,8 +1826,11 @@
 #             print(f"❌ Resend Error: {e}")
 
 
+import logging
 import resend
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 if settings.RESEND_API_KEY:
     resend.api_key = settings.RESEND_API_KEY
