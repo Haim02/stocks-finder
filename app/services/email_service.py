@@ -2152,3 +2152,292 @@ class EmailService:
             print(f"✅ Institutional research email sent ({n} stocks).")
         except Exception as e:
             print(f"❌ Resend Error: {e}")
+
+    # ------------------------------------------------------------------
+    # Options email  (Daily Options Brief)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def send_options_report(report: dict, ai_analysis: dict) -> None:
+        """
+        Sends the Daily Options Brief email.
+        report      : dict from OptionsService.build_report()
+        ai_analysis : dict from AIService.get_options_analysis()
+        """
+        if not settings.RESEND_API_KEY:
+            return
+
+        spx      = report.get("spx_price", "N/A")
+        vix      = report.get("vix", "N/A")
+        dt       = report.get("scan_date", "")
+        setup    = report.get("spx_setup") or {}
+        stocks   = report.get("stock_options") or []
+        spx_ai   = _md_to_html(ai_analysis.get("spx_analysis", ""))
+        stock_ai = _md_to_html(ai_analysis.get("stock_analysis", ""))
+
+        vix_color = "#dc2626" if float(vix or 0) > 25 else (
+                    "#d97706" if float(vix or 0) > 18 else "#16a34a")
+
+        subject = f"📊 Daily Options Brief — SPX {spx}  |  VIX {vix}"
+
+        # ── Header ──────────────────────────────────────────────────────
+        html = (
+            '<div dir="rtl" style="font-family:\'Segoe UI\',Arial,sans-serif;'
+            'max-width:780px;margin:0 auto;background:#0d1117;padding:20px;">'
+
+            # Title bar
+            '<div style="background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);'
+            'color:white;padding:24px 30px;border-radius:12px;margin-bottom:20px;text-align:center;">'
+            '<div style="font-size:11px;letter-spacing:3px;opacity:0.6;margin-bottom:6px;">'
+            'TASTYTRADE · OPTIONS INTELLIGENCE · DAILY BRIEF</div>'
+            f'<h2 style="margin:0;font-size:24px;font-weight:700;">📊 Daily Options Brief — {dt}</h2>'
+            '<div style="margin-top:12px;display:flex;justify-content:center;gap:24px;flex-wrap:wrap;">'
+            f'<div style="background:rgba(255,255,255,0.1);padding:8px 20px;border-radius:20px;">'
+            f'<b>SPX</b> {spx}</div>'
+            f'<div style="background:{vix_color};padding:8px 20px;border-radius:20px;">'
+            f'<b>VIX</b> {vix}</div>'
+            '</div></div>'
+        )
+
+        # ── 0DTE Trade Ticket ──────────────────────────────────────────
+        if setup:
+            spy_px   = setup.get("spy_price", "—")
+            put_s    = setup.get("put_spread") or {}
+            call_s   = setup.get("call_spread") or {}
+            tot_cr   = setup.get("total_credit", "—")
+            stop     = setup.get("stop_loss", "—")
+            tgt      = setup.get("profit_target", "—")
+            expiry   = setup.get("expiry", "—")
+
+            def _spread_cell(s: dict, bg: str, emoji: str, title: str) -> str:
+                if not s:
+                    return (f'<td style="padding:14px;background:{bg};border-radius:8px;">'
+                            f'<div style="font-weight:700;color:white;">{emoji} {title}</div>'
+                            '<div style="color:rgba(255,255,255,0.6);margin-top:6px;">לא זמין</div></td>')
+                return (
+                    f'<td style="padding:14px;background:{bg};border-radius:8px;width:50%;">'
+                    f'<div style="font-weight:700;font-size:14px;color:white;margin-bottom:8px;">{emoji} {title}</div>'
+                    f'<div style="color:rgba(255,255,255,0.9);font-size:13px;line-height:1.8;">'
+                    f'Short: <b>{s.get("short_strike")}</b><br>'
+                    f'Long: <b>{s.get("long_strike")}</b><br>'
+                    f'קרדיט: <b>${s.get("credit")}</b><br>'
+                    f'Delta: <b>{s.get("short_delta")}</b><br>'
+                    f'Max Loss: <b>${s.get("max_loss")}</b><br>'
+                    f'Breakeven: <b>{s.get("breakeven")}</b>'
+                    f'</div></td>'
+                )
+
+            html += (
+                '<div style="background:#111827;border:1px solid #374151;border-radius:12px;'
+                'padding:20px;margin-bottom:20px;">'
+                '<div style="text-align:center;font-size:13px;font-weight:700;color:#f59e0b;'
+                'letter-spacing:2px;margin-bottom:16px;">🎫 0DTE SPX IRON CONDOR TRADE TICKET</div>'
+
+                '<div style="background:#1f2937;border-radius:8px;padding:10px 16px;'
+                'display:flex;justify-content:space-between;margin-bottom:14px;'
+                'font-size:13px;color:#9ca3af;">'
+                f'<span>SPY: <b style="color:white">{spy_px}</b></span>'
+                f'<span>Expiry: <b style="color:white">{expiry}</b></span>'
+                f'<span>VIX: <b style="color:{vix_color}">{vix}</b></span>'
+                '</div>'
+
+                '<table style="width:100%;border-collapse:separate;border-spacing:8px;">'
+                '<tr>'
+                + _spread_cell(put_s,  "rgba(22,163,74,0.25)",  "🐂", "Bull Put Spread")
+                + _spread_cell(call_s, "rgba(220,38,38,0.25)",  "🐻", "Bear Call Spread")
+                + '</tr></table>'
+
+                '<div style="background:#1f2937;border-radius:8px;padding:12px 16px;'
+                'margin-top:14px;display:flex;justify-content:space-between;flex-wrap:wrap;'
+                'gap:8px;font-size:13px;">'
+                f'<span style="color:#4ade80;">✅ קרדיט כולל: <b>${tot_cr}</b></span>'
+                f'<span style="color:#f59e0b;">🎯 Profit Target: <b>${tgt}</b> (50%)</span>'
+                f'<span style="color:#f87171;">🛑 Stop Loss: <b>${stop}</b> (2× קרדיט)</span>'
+                '</div>'
+            )
+
+            # AI SPX analysis
+            if spx_ai:
+                html += (
+                    '<div style="background:#0f172a;border-right:3px solid #f59e0b;'
+                    'padding:14px 16px;margin-top:14px;border-radius:4px;">'
+                    '<div style="font-size:11px;color:#f59e0b;font-weight:700;'
+                    'letter-spacing:1px;margin-bottom:8px;">🤖 ניתוח Tastytrade Analyst</div>'
+                    f'<div style="font-size:13px;line-height:1.8;color:#e2e8f0;">{spx_ai}</div>'
+                    '</div>'
+                )
+
+            html += '</div>'
+
+        # ── Stock options cards (green = CALL/Bullish, red = PUT/Bearish) ──
+        if stocks:
+            html += (
+                '<div style="margin-bottom:20px;">'
+                '<div style="font-size:13px;font-weight:700;color:#e2e8f0;'
+                'letter-spacing:2px;margin-bottom:14px;padding:0 4px;">'
+                '📈 STOCK OPTIONS — CREDIT SPREADS</div>'
+            )
+
+            for opt in stocks:
+                is_bull    = opt["direction"] == "Bullish"
+                iv_pct     = f"{opt.get('iv', 0) * 100:.0f}%" if opt.get("iv") else "—"
+                conf_str   = f"{opt['confidence']:.0f}%" if opt.get("confidence") else "—"
+                conf_color = (
+                    "#4ade80" if (opt.get("confidence") or 0) >= 60
+                    else ("#fbbf24" if (opt.get("confidence") or 0) >= 40 else "#f87171")
+                )
+
+                # Direction-specific theming
+                if is_bull:
+                    border_c   = "#16a34a"
+                    hdr_grad   = "linear-gradient(90deg,#14532d,#166534)"
+                    accent_c   = "#4ade80"
+                    dir_label  = "קניית CALL"
+                    dir_emoji  = "📈"
+                    badge_bg   = "rgba(74,222,128,0.15)"
+                else:
+                    border_c   = "#dc2626"
+                    hdr_grad   = "linear-gradient(90deg,#7f1d1d,#991b1b)"
+                    accent_c   = "#f87171"
+                    dir_label  = "קניית PUT"
+                    dir_emoji  = "📉"
+                    badge_bg   = "rgba(248,113,113,0.15)"
+
+                # News headlines
+                news = opt.get("news_headlines") or []
+                news_html = ""
+                if news:
+                    news_items = "".join(
+                        f'<div style="padding:3px 0;color:#cbd5e1;font-size:12px;">'
+                        f'• {h}</div>'
+                        for h in news[:3]
+                    )
+                    news_html = (
+                        f'<div style="background:#0f172a;border-right:2px solid {border_c};'
+                        f'padding:10px 14px;margin-top:12px;border-radius:4px;">'
+                        f'<div style="font-size:11px;color:{accent_c};font-weight:700;'
+                        f'letter-spacing:1px;margin-bottom:6px;">📰 חדשות אחרונות</div>'
+                        f'{news_items}</div>'
+                    )
+
+                html += (
+                    f'<div style="border-radius:12px;overflow:hidden;margin-bottom:16px;'
+                    f'border:1px solid {border_c};">'
+
+                    # Card header
+                    f'<div style="background:{hdr_grad};padding:14px 18px;'
+                    f'display:flex;justify-content:space-between;align-items:center;">'
+                    f'<div>'
+                    f'<div style="color:white;font-size:22px;font-weight:700;letter-spacing:1px;">'
+                    f'{dir_emoji} {opt["ticker"]}</div>'
+                    f'<div style="color:rgba(255,255,255,0.8);font-size:14px;margin-top:3px;">'
+                    f'{dir_label} — <span style="opacity:0.7">{opt["strategy"]}</span></div>'
+                    f'</div>'
+                    f'<div style="text-align:left;">'
+                    f'<div style="background:rgba(255,255,255,0.2);color:white;'
+                    f'padding:6px 14px;border-radius:20px;font-size:13px;font-weight:700;">'
+                    f'XGBoost: <span style="color:{conf_color}">{conf_str}</span></div>'
+                    f'<div style="color:rgba(255,255,255,0.6);font-size:12px;'
+                    f'margin-top:4px;text-align:center;">מחיר: ${opt.get("spot_price","—")}</div>'
+                    f'</div></div>'
+
+                    # Card body
+                    f'<div style="background:#111827;padding:14px 18px;">'
+
+                    # Strikes / expiry row
+                    f'<div style="display:flex;gap:14px;flex-wrap:wrap;'
+                    f'margin-bottom:12px;font-size:13px;">'
+                    f'<span style="color:#9ca3af;">Short: <b style="color:white">'
+                    f'{opt.get("short_strike","—")}</b></span>'
+                    f'<span style="color:#9ca3af;">Long: <b style="color:white">'
+                    f'{opt.get("long_strike","—")}</b></span>'
+                    f'<span style="color:#9ca3af;">פקיעה: <b style="color:white">'
+                    f'{opt.get("expiry","—")} ({opt.get("days","—")}d)</b></span>'
+                    f'<span style="color:#9ca3af;">Delta: <b style="color:#93c5fd">'
+                    f'{opt.get("delta","—")}</b></span>'
+                    f'<span style="color:#9ca3af;">IV: <b style="color:#fbbf24">'
+                    f'{iv_pct}</b></span>'
+                    f'</div>'
+
+                    # P&L badges
+                    f'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">'
+                    f'<span style="background:rgba(74,222,128,0.15);color:#4ade80;'
+                    f'padding:5px 12px;border-radius:6px;font-size:12px;font-weight:700;">'
+                    f'קרדיט: ${opt.get("credit","—")}</span>'
+                    f'<span style="background:rgba(74,222,128,0.12);color:#4ade80;'
+                    f'padding:5px 12px;border-radius:6px;font-size:12px;">'
+                    f'Max Profit: ${opt.get("max_profit","—")}</span>'
+                    f'<span style="background:rgba(248,113,113,0.12);color:#f87171;'
+                    f'padding:5px 12px;border-radius:6px;font-size:12px;">'
+                    f'Max Loss: ${opt.get("max_loss","—")}</span>'
+                    f'<span style="background:rgba(251,191,36,0.12);color:#fbbf24;'
+                    f'padding:5px 12px;border-radius:6px;font-size:12px;">'
+                    f'Breakeven: {opt.get("breakeven","—")}</span>'
+                    f'</div>'
+
+                    f'{news_html}'
+                    f'</div></div>'  # /body, /card
+                )
+
+            # Combined AI stock analysis
+            if stock_ai:
+                html += (
+                    '<div style="background:#111827;border:1px solid #374151;'
+                    'border-radius:12px;padding:16px 20px;margin-top:4px;">'
+                    '<div style="font-size:11px;color:#60a5fa;font-weight:700;'
+                    'letter-spacing:1.5px;margin-bottom:10px;">'
+                    '🤖 ניתוח מניות — Tastytrade Analyst</div>'
+                    f'<div style="font-size:13px;line-height:1.9;color:#e2e8f0;">{stock_ai}</div>'
+                    '</div>'
+                )
+
+            html += '</div>'  # /stocks section
+
+        # ── Market context footer ──────────────────────────────────────
+        macro      = report.get("macro_context") or {}
+        fed_rate   = macro.get("fed_rate", "N/A")
+        cpi_yoy    = macro.get("cpi_yoy",  "N/A")
+        macro_reg  = macro.get("regime",   "")
+        macro_note = macro.get("notes",    "")
+        regime_color = (
+            "#f87171" if macro_reg in ("HIGH_RATE", "ELEVATED") else
+            "#4ade80" if macro_reg == "LOW_RATE" else "#fbbf24"
+        )
+
+        html += (
+            '<div style="background:#111827;border:1px solid #374151;border-radius:12px;'
+            'padding:16px 20px;margin-bottom:20px;">'
+            '<div style="font-size:11px;font-weight:700;color:#9ca3af;'
+            'letter-spacing:2px;margin-bottom:12px;">🌡️ MARKET CONTEXT &amp; MACRO</div>'
+            '<div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px;margin-bottom:10px;">'
+            f'<div style="color:#e2e8f0;"><b>VIX:</b> <span style="color:{vix_color}">{vix}</span></div>'
+            f'<div style="color:#e2e8f0;"><b>SPX:</b> <span style="color:white">{spx}</span></div>'
+            f'<div style="color:#e2e8f0;"><b>Fed Rate:</b> <span style="color:{regime_color}">{fed_rate}%</span></div>'
+            f'<div style="color:#e2e8f0;"><b>CPI YoY:</b> <span style="color:#fbbf24">{cpi_yoy}%</span></div>'
+            f'<div style="color:#e2e8f0;"><b>Regime:</b> <span style="color:{regime_color}">{macro_reg}</span></div>'
+            '</div>'
+            + (
+                f'<div style="background:#0f172a;border-right:2px solid {regime_color};'
+                f'padding:8px 12px;border-radius:4px;font-size:12px;color:#cbd5e1;">'
+                f'{macro_note}</div>'
+                if macro_note else ""
+            )
+            + '</div>'
+
+            # Footer
+            '<div style="text-align:center;font-size:11px;color:#4b5563;padding-bottom:10px;">'
+            'Daily Options Brief · Tastytrade Methodology · Powered by AI + XGBoost · '
+            'Not investment advice — manage your own risk</div>'
+            '</div>'
+        )
+
+        try:
+            resend.Emails.send({
+                "from":    settings.FROM_EMAIL,
+                "to":      [settings.ALERT_TO_EMAIL],
+                "subject": subject,
+                "html":    html,
+            })
+            print(f"✅ Daily Options Brief sent (VIX={vix}, stocks={len(stocks)}).")
+        except Exception as e:
+            print(f"❌ Options email send error: {e}")

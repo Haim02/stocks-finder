@@ -150,6 +150,7 @@ def run_scan():
             return
 
         found_alerts = []
+        ai_service = AIService()
 
         for ticker in potential_stocks:
             print(f"\n--- 🔍 Deep Analysis: {ticker} ---")
@@ -181,14 +182,14 @@ def run_scan():
                         fundamentals = DataFetcher.get_finnhub_fundamentals(ticker)
                         news = DataFetcher.get_finnhub_news(ticker)
 
-                        ai_report = AIService.analyze_stock(
+                        ai_report = ai_service.analyze_stock_full_report(
                             ticker=ticker,
                             price=analysis['price'],
                             score=score,
                             reasons=analysis['reasons'],
                             fundamentals=fundamentals,
                             news=news,
-                            company_info=company_info
+                            company_info=company_info,
                         )
 
                         analysis['ai_report'] = ai_report

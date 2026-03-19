@@ -20,11 +20,22 @@ class Settings(BaseSettings):
     # API & Security
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
     FINNHUB_API_KEY: str = os.getenv("FINNHUB_API_KEY")
-    # OPENAI_API_KEY: str
-    # FINNHUB_API_KEY: str
     RESEND_API_KEY: str
     DATABASE_URL: str
-    WEBHOOK_SECRET: str ="optional_secret"
+    WEBHOOK_SECRET: str = "optional_secret"
+
+    # Premium market data APIs (all optional — services degrade gracefully)
+    MARKETSTACK_API_KEY:  Optional[str] = os.getenv("MARKETSTACK_API_KEY")
+    ALPHA_VANTAGE_API_KEY: Optional[str] = os.getenv("ALPHA_VANTAGE_API_KEY")
+    FINAGE_API_KEY:       Optional[str] = os.getenv("FINAGE_API_KEY")
+    FRED_API_KEY:         Optional[str] = os.getenv("FRED_API_KEY")
+    ALETHEIA_API_KEY:     Optional[str] = os.getenv("ALETHEIA_API_KEY")
+    ALPACA_API_KEY:       Optional[str] = os.getenv("ALPACA_API_KEY")
+    ALPACA_API_SECRET:    Optional[str] = os.getenv("ALPACA_API_SECRET")
+
+    # Telegram Bot (optional — mobile access to the trading agent)
+    TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN")
+    TELEGRAM_CHAT_ID:   Optional[str] = os.getenv("TELEGRAM_CHAT_ID")
 
     # Email Settings
     ALERT_TO_EMAIL: str

@@ -1,0 +1,33 @@
+# ── Virtual environments (LARGE — must exclude) ──────────────────────────────
+.venv/
+env/
+venv/
+
+# ── Secrets — passed via --env-file at runtime, never baked into the image ───
+.env
+
+# ── Python bytecode ──────────────────────────────────────────────────────────
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ── Version control ──────────────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── Logs (runtime-generated, mounted as a volume) ────────────────────────────
+logs/
+
+# ── Dev tooling ──────────────────────────────────────────────────────────────
+.claude/
+.vscode/
+*.md
+
+# ── OS artifacts ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── ChromeDriver cache (rebuilt inside container) ─────────────────────────────
+drivers/

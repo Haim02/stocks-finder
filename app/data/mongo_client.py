@@ -208,6 +208,36 @@ class MongoDB:
             )
             return []
 
+    # --- Options Cooldown ---
+
+    @classmethod
+    def log_options_sent(cls, ticker: str) -> None:
+        """Records that a ticker was included in an options email."""
+        try:
+            db = cls.get_db()
+            db.sent_options.insert_one({
+                "ticker": ticker.upper(),
+                "sent_at": datetime.now(pytz.utc),
+            })
+        except Exception:
+            logger.exception("Failed to log options sent for %s", ticker)
+
+    @classmethod
+    def was_options_sent_recently(cls, ticker: str, days: int = 4) -> bool:
+        """Returns True if this ticker appeared in an options email within the last `days` days."""
+        try:
+            db = cls.get_db()
+            cutoff = datetime.now(pytz.utc) - timedelta(days=days)
+            return (
+                db.sent_options.count_documents(
+                    {"ticker": ticker.upper(), "sent_at": {"$gte": cutoff}}
+                )
+                > 0
+            )
+        except Exception:
+            logger.exception("Failed to check options cooldown for %s", ticker)
+            return False
+
     @classmethod
     def save_institutional_pick(cls, pick_data: dict):
         """Saves a stock that passed the Smart Money filter (upsert per day)."""

@@ -1,0 +1,82 @@
+version: "3.9"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Autonomous Trading Agent — Docker Compose
+#
+# Architecture:
+#   trading-bot  — APScheduler (16:45 Israel time) + Telegram bot polling loop
+#
+# Data persistence:
+#   MongoDB cooldown data (4-day options history, alert history) lives in
+#   MongoDB Atlas (cloud). MONGO_URI in .env points to your Atlas cluster —
+#   no local Mongo container is needed. Atlas data survives container restarts.
+#
+# Usage:
+#   docker compose up -d          # start in background
+#   docker compose logs -f        # follow live logs
+#   docker compose down           # stop
+#   docker compose restart        # restart after code change + rebuild
+#
+# Deploy to VPS (e.g. DigitalOcean, Hetzner):
+#   1. scp the project folder to the server (exclude .venv/, .env)
+#   2. Create .env on the server with your real keys
+#   3. docker compose up -d
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  trading-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: trading-agent:latest
+    container_name: trading-agent
+
+    # Restart always — survives server reboots and crash loops
+    restart: always
+
+    # ── All secrets loaded from .env on the host — never hardcoded ────────
+    env_file:
+      - .env
+
+    # ── Overrides on top of .env ───────────────────────────────────────────
+    environment:
+      TZ: Asia/Jerusalem          # scheduler fires at 16:45 Israel time
+      PYTHONUNBUFFERED: "1"       # logs appear immediately, no buffering
+      CHROME_HEADLESS: "1"        # Chrome runs without a display
+      WDM_LOG: "0"                # silence webdriver-manager download logs
+      WDM_LOCAL: "1"              # ChromeDriver cache inside /app/drivers/
+
+    # ── Daemon mode: 16:45 scheduler + Telegram bot ───────────────────────
+    command: ["python", "run_agent.py", "--daemon"]
+
+    # ── Volumes ───────────────────────────────────────────────────────────
+    volumes:
+      # Persistent logs — survives container restarts and rebuilds
+      - ./logs:/app/logs
+      # ChromeDriver cache — avoids re-downloading on every restart
+      - chromedriver-cache:/app/drivers
+
+    # ── Resource limits (adjust for your VPS plan) ────────────────────────
+    mem_limit: 1500m
+    cpus: "1.5"
+
+    # ── Health check — verifies the Python process is alive ──────────────
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'python run_agent.py' > /dev/null || exit 1"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
+    # ── Logging — cap log size so disk doesn't fill up ────────────────────
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+# ── Named volumes ─────────────────────────────────────────────────────────────
+volumes:
+  chromedriver-cache:
+    driver: local

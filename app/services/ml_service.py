@@ -53,8 +53,14 @@ SENTIMENT_FEATURE_COLS = [
     "sent_has_data",  # 1.0 if an actual LLM score exists, 0.0 otherwise
 ]
 
+# Macro regime features added in v3 (requires FRED_API_KEY)
+MACRO_FEATURE_COLS = [
+    "fed_rate",   # FRED FEDFUNDS — effective federal funds rate (%)
+    "cpi_yoy",    # FRED CPIAUCSL YoY % — inflation regime signal
+]
+
 # Full feature list used for training and inference
-FEATURE_COLS = TECHNICAL_FEATURE_COLS + SENTIMENT_FEATURE_COLS
+FEATURE_COLS = TECHNICAL_FEATURE_COLS + SENTIMENT_FEATURE_COLS + MACRO_FEATURE_COLS
 
 # Module-level model cache (avoids reloading on every call)
 _model_cache: dict | None = None
@@ -146,6 +152,89 @@ def add_sentiment_features(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
     return df
 
 
+def add_macro_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Merges FRED macro time-series (Fed Rate, CPI YoY) into the OHLCV DataFrame.
+
+    For training (historical df):
+      Downloads the full FRED series for the df's date range and forward-fills
+      monthly/quarterly observations to every trading day.
+
+    For inference (df with recent rows only):
+      Falls back to the current FRED values from api_hub.get_macro_context().
+
+    Defaults when FRED_API_KEY is absent or data is unavailable:
+      fed_rate = 5.0 (neutral-ish), cpi_yoy = 3.0
+    """
+    df = df.copy()
+    df["fed_rate"] = 5.0    # neutral default
+    df["cpi_yoy"]  = 3.0
+
+    try:
+        from app.services.api_hub import get_fred_series, get_macro_context
+
+        if df.index.empty:
+            return df
+
+        start_str = df.index.min().strftime("%Y-%m-%d")
+        end_str   = df.index.max().strftime("%Y-%m-%d")
+
+        # ── Fed Funds Rate ────────────────────────────────────────────────
+        fed_series = get_fred_series("FEDFUNDS", start_str, end_str)
+        if fed_series:
+            # Build a date-indexed Series, forward-fill to daily
+            fed_s = pd.Series(fed_series).sort_index()
+            date_strs = df.index.strftime("%Y-%m-%d")
+            filled_fed = []
+            last_val = 5.0
+            for d in date_strs:
+                if d in fed_series:
+                    last_val = fed_series[d]
+                filled_fed.append(last_val)
+            df["fed_rate"] = filled_fed
+
+        # ── CPI YoY ───────────────────────────────────────────────────────
+        # Download 13+ months back to compute rolling 12-month % change
+        extended_start = (
+            df.index.min() - pd.DateOffset(months=14)
+        ).strftime("%Y-%m-%d")
+        cpi_series = get_fred_series("CPIAUCSL", extended_start, end_str)
+        if cpi_series:
+            cpi_dates = sorted(cpi_series.keys())
+            # Build monthly dict then compute YoY
+            cpi_yoy_map: dict[str, float] = {}
+            for i, d in enumerate(cpi_dates):
+                if i < 12:
+                    continue
+                yr_ago = cpi_dates[i - 12]
+                try:
+                    yoy = (cpi_series[d] - cpi_series[yr_ago]) / cpi_series[yr_ago] * 100
+                    cpi_yoy_map[d[:7]] = round(yoy, 2)   # key = YYYY-MM
+                except ZeroDivisionError:
+                    pass
+            if cpi_yoy_map:
+                date_strs = df.index.strftime("%Y-%m")
+                filled_cpi = []
+                last_cpi = 3.0
+                for ym in date_strs:
+                    if ym in cpi_yoy_map:
+                        last_cpi = cpi_yoy_map[ym]
+                    filled_cpi.append(last_cpi)
+                df["cpi_yoy"] = filled_cpi
+        else:
+            # Fallback: use current macro context for all rows (inference mode)
+            ctx = get_macro_context()
+            if ctx["fed_rate"] != "N/A":
+                df["fed_rate"] = float(ctx["fed_rate"])
+            if ctx["cpi_yoy"] != "N/A":
+                df["cpi_yoy"] = float(ctx["cpi_yoy"])
+
+    except Exception:
+        logger.warning("add_macro_features failed — using defaults", exc_info=True)
+
+    return df
+
+
 def label_rows(df: pd.DataFrame) -> pd.Series:
     """
     For every row label 1 if the max Close over the next FORWARD_DAYS
@@ -210,6 +299,10 @@ def predict_confidence(ticker: str) -> float | None:
         # Only add sentiment features if the model was trained with them
         if "sent_score" in feature_cols:
             df = add_sentiment_features(df, ticker)
+
+        # Only add macro features if the model was trained with them
+        if "fed_rate" in feature_cols:
+            df = add_macro_features(df)
 
         df = df.dropna(subset=feature_cols)
         if df.empty:

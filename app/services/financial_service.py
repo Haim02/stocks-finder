@@ -166,12 +166,21 @@ class FinancialAnalyzer:
             except Exception:
                 logger.warning("Quarterly financials failed for %s", ticker, exc_info=True)
 
-            # --- Enriched institutional data ---
+            # --- Enriched institutional data (5-yr margins, FCF, valuation) ---
             try:
                 enriched = self._fetch_enriched(stock, info)
                 financial_data.update(enriched)
             except Exception:
                 logger.debug("Enriched data fetch failed for %s", ticker, exc_info=True)
+
+            # --- Institutional ownership + SEC EDGAR (api_hub) ---
+            try:
+                from app.services.api_hub import get_institutional_data
+                inst = get_institutional_data(ticker)
+                if inst:
+                    financial_data.update(inst)
+            except Exception:
+                logger.debug("Institutional data fetch skipped for %s", ticker)
 
             return financial_data
 

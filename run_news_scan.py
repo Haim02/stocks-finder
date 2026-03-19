@@ -48,9 +48,9 @@ logger = logging.getLogger(__name__)
 #     "sh_short_o5,ta_beta_o1.5,ta_perf_dup,ta_rsi_nos50,ta_sma20_pa,ta_sma50_pa"
 #     "&ft=4"
 # )
-# SCAN_URL = "https://finviz.com/screener.ashx?v=211&f=sh_avgvol_o500,sh_curvol_o500,sh_relvol_o1,sh_short_o5,ta_beta_o1.5,ta_perf_dup,ta_rsi_nos50&ft=4"
+SCAN_URL = "https://finviz.com/screener.ashx?v=211&f=sh_avgvol_o500,sh_curvol_o500,sh_relvol_o1,sh_short_o5,ta_beta_o1.5,ta_perf_dup,ta_rsi_nos50&ft=4"
 # Option B: TradingView (uncomment and replace SCAN_URL above)
-SCAN_URL = "https://www.tradingview.com/screener/BmHEGvNM/"
+# SCAN_URL = "https://www.tradingview.com/screener/BmHEGvNM/"
 
 NEWS_SCORE_THRESHOLD = 50
 NEWS_FRESHNESS_DAYS = 3

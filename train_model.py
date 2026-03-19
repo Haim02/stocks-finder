@@ -368,6 +368,7 @@ from app.services.ml_service import (
     FORWARD_DAYS,
     GAIN_THRESHOLD,
     XGB_MODEL_PATH,
+    add_macro_features,
     add_sentiment_features,
     extract_features,
     label_rows,
@@ -381,6 +382,7 @@ logger = logging.getLogger(__name__)
 
 MODEL_DIR = os.path.dirname(XGB_MODEL_PATH)
 MIN_ROWS_PER_TICKER = 60
+CORP_ACTION_BUFFER_DAYS = 3   # rows within N days of a split/dividend are dropped
 
 # Broad training universe — S&P 500 sample + small/mid caps for variety
 TRAINING_UNIVERSE = [
@@ -415,28 +417,81 @@ def get_training_tickers() -> list[str]:
     return sorted(tickers)
 
 
+def _get_blackout_dates(ticker: str, start_str: str, end_str: str) -> set[str]:
+    """
+    Returns a set of date strings (YYYY-MM-DD) that are within
+    CORP_ACTION_BUFFER_DAYS of a stock split or dividend ex-date.
+
+    These rows are dropped from training because price changes on those
+    dates are driven by the corporate action, not by tradeable momentum.
+    """
+    blackout: set[str] = set()
+    try:
+        from app.services.api_hub import get_corporate_actions
+        actions = get_corporate_actions(ticker, start_str, end_str)
+        event_dates: list[str] = (
+            [s["date"] for s in actions.get("splits", [])]
+            + [d["date"] for d in actions.get("dividends", [])]
+        )
+        for event_str in event_dates:
+            try:
+                event_dt = datetime.strptime(event_str, "%Y-%m-%d")
+                for delta in range(-CORP_ACTION_BUFFER_DAYS, CORP_ACTION_BUFFER_DAYS + 1):
+                    nearby = event_dt + timedelta(days=delta)
+                    blackout.add(nearby.strftime("%Y-%m-%d"))
+            except ValueError:
+                continue
+    except Exception:
+        logger.debug("Corporate actions lookup failed for %s", ticker)
+    return blackout
+
+
 def build_dataset(tickers: list[str]) -> tuple[pd.DataFrame, pd.Series]:
-    """Download 2 years of OHLCV data and build (X, y) for training."""
+    """
+    Download 2 years of OHLCV data and build (X, y) for training.
+
+    Enhancements over v1:
+      - Filters rows distorted by stock splits / dividends (api_hub)
+      - Adds FRED macro features: fed_rate, cpi_yoy (via add_macro_features)
+    """
     end_date   = datetime.now()
     start_date = end_date - timedelta(days=730)
+    start_str  = start_date.strftime("%Y-%m-%d")
+    end_str    = end_date.strftime("%Y-%m-%d")
     all_X: list[pd.DataFrame] = []
     all_y: list[pd.Series]    = []
 
     for ticker in tickers:
         try:
-            df = yf.Ticker(ticker).history(
-                start=start_date.strftime("%Y-%m-%d"),
-                end=end_date.strftime("%Y-%m-%d"),
-            )
+            df = yf.Ticker(ticker).history(start=start_str, end=end_str)
             if df.empty or len(df) < MIN_ROWS_PER_TICKER:
                 logger.debug("Skipping %s — only %d rows", ticker, len(df))
                 continue
 
-            df           = extract_features(df)
-            df           = add_sentiment_features(df, ticker)
-            df["label"]  = label_rows(df)
-            valid_mask   = df[FEATURE_COLS + ["label"]].notna().all(axis=1)
-            df           = df[valid_mask]
+            # ── Corporate action blackout filter ──────────────────────────
+            blackout = _get_blackout_dates(ticker, start_str, end_str)
+            if blackout:
+                date_strs = df.index.strftime("%Y-%m-%d")
+                mask      = ~pd.Series(date_strs, index=df.index).isin(blackout)
+                before    = len(df)
+                df        = df[mask.values]
+                removed   = before - len(df)
+                if removed:
+                    logger.debug(
+                        "%s: removed %d rows near corporate actions", ticker, removed
+                    )
+
+            if len(df) < MIN_ROWS_PER_TICKER:
+                continue
+
+            # ── Feature engineering ───────────────────────────────────────
+            df          = extract_features(df)
+            df          = add_sentiment_features(df, ticker)
+            df          = add_macro_features(df)          # FRED: fed_rate, cpi_yoy
+            df["label"] = label_rows(df)
+
+            valid_mask  = df[FEATURE_COLS + ["label"]].notna().all(axis=1)
+            df          = df[valid_mask]
             if len(df) < 30:
                 continue
 
