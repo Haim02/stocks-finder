@@ -47,10 +47,7 @@ logger = logging.getLogger(__name__)
 # ── Screener URLs — all edits belong here, never buried inside functions ──────
 SCAN_SOURCES: dict[str, str] = {
     "finviz": (
-        "https://finviz.com/screener.ashx?v=211"
-        "&f=sh_avgvol_o500,sh_curvol_o500,sh_relvol_o1,sh_short_o5,"
-        "ta_beta_o1.5,ta_perf_dup,ta_rsi_nos50"
-        "&ft=4"
+        "https://finviz.com/screener.ashx?v=211&f=sh_avgvol_o400,sh_relvol_o1.5,sh_short_o5,ta_beta_o0.5,ta_rsi_nos50&ft=4"
     ),
     "tv": "https://www.tradingview.com/screener/BmHEGvNM/",
 }
