@@ -18,7 +18,14 @@ class MongoDB:
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     def get_db(cls):
         if cls._client is None:
-            logger.info("Connecting to MongoDB...")
+            import os
+            # Log which variable supplied the URI so Railway deployments are easy to debug
+            source = (
+                "MONGODB_URL (Railway)"  if os.getenv("MONGODB_URL")
+                else "MONGO_URI (.env)"  if os.getenv("MONGO_URI")
+                else "hardcoded fallback"
+            )
+            logger.info("Connecting to MongoDB via %s ...", source)
             cls._client = MongoClient(
                 settings.MONGO_URI,
                 tlsCAFile=certifi.where(),
