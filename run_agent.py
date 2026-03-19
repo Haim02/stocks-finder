@@ -1,37 +1,32 @@
 """
-Autonomous Trading Agent — Entry Point
-=======================================
-Starts the autonomous Hedge Fund Manager agent for the daily options workflow.
+Autonomous Trading Agent — Production Entry Point
+==================================================
+Starts BOTH the Telegram bot AND the APScheduler in a single process.
 
-The agent operates via a ReAct loop (Reason → Act → Observe → Reason ...):
-  1. Checks market conditions (VIX, SPX, FRED macro)
-  2. Decides which direction to scan based on macro regime
-  3. Scans Finviz, filters by XGBoost, checks 4-day cooldown
-  4. Runs deep fundamental + institutional analysis on top candidates
-  5. Builds 0DTE SPX iron condor and stock credit spreads
-  6. Compiles and sends the Daily Options Brief — ONLY if quality ≥ 60
-  7. Aborts cleanly when conditions are unfavorable
+Default mode (no flags): DAEMON — runs forever on Railway/VPS.
+  - Telegram bot responds to /scan, /status, /options, /analyze
+  - APScheduler fires the daily options workflow at 16:45 Israel time (Mon–Fri)
 
-No manual pipeline decisions are made in this file.
-All reasoning and tool-selection is done autonomously by GPT-4o.
+Single-run mode (--once): execute one agent cycle and exit.
+  Used for manual testing or cron-based orchestration.
 
 Usage:
-    python run_agent.py              # run once now
-    python run_agent.py --daemon     # scheduler (16:45 Israel) + Telegram bot
+    python run_agent.py          # daemon: scheduler + Telegram bot (Railway default)
+    python run_agent.py --once   # single options-agent run, then exit
 
-Schedule: runs daily at 16:45 Israel time (= 09:45 US/Eastern), Mon–Fri.
+Schedule: 16:45 Asia/Jerusalem = 09:45 US/Eastern (correct in all seasons).
 """
 
+import argparse
 import logging
+import os
 import sys
 from datetime import datetime
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-    ],
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
 
@@ -41,7 +36,7 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def run_once() -> None:
-    """Execute a single agent workflow and log the result."""
+    """Execute a single options-agent workflow and log the result."""
     start = datetime.now()
     logger.info("╔══════════════════════════════════════╗")
     logger.info("║   Autonomous Trading Agent — Start   ║")
@@ -60,7 +55,6 @@ def run_once() -> None:
         logger.info("Elapsed: %.1fs", elapsed)
         logger.info("Summary:\n%s", summary)
 
-        # Print the tool call trace for easy debugging
         log = agent.tool_call_log
         if log:
             logger.info("── Tool call trace (%d calls) ──", len(log))
@@ -72,10 +66,9 @@ def run_once() -> None:
                     str(entry["args"])[:80],
                 )
 
-        # Telegram notification with the closing summary
         try:
             from app.agent.telegram_bot import notify_trade
-            short = summary[:600] if summary else "הסוכן השלים את הריצה היומית."
+            short = (summary or "הסוכן השלים את הריצה היומית.")[:600]
             notify_trade(f"🤖 *סוכן יומי — הושלם*\n\n{short}")
         except Exception:
             pass  # non-fatal
@@ -88,37 +81,29 @@ def run_once() -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Daemon mode — APScheduler + Telegram bot
+# Daemon mode — APScheduler + Telegram bot (production default)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def run_daemon() -> None:
     """
-    Start APScheduler (daily 09:45 EST) AND the Telegram bot in daemon mode.
+    Production mode: start APScheduler + Telegram bot in one process.
 
-    The scheduler fires run_once() every weekday at 09:45 US/Eastern.
-    The Telegram bot runs in the main thread (blocking).
-    The scheduler runs in a background thread.
+    Scheduler: fires run_once() at 16:45 Asia/Jerusalem, Mon–Fri.
+    Telegram:  responds to /scan /status /options /analyze (blocking main thread).
     """
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         from apscheduler.triggers.cron import CronTrigger
     except ImportError:
-        logger.error(
-            "APScheduler not installed. Run: pip install apscheduler"
-        )
+        logger.error("APScheduler not installed. Run: pip install apscheduler")
         sys.exit(1)
 
     try:
         from app.agent.telegram_bot import run_bot
     except ImportError:
-        logger.error(
-            "python-telegram-bot not installed. Run: pip install python-telegram-bot"
-        )
+        logger.error("python-telegram-bot not installed. Run: pip install python-telegram-bot")
         sys.exit(1)
 
-    # ── Scheduler ──────────────────────────────────────────────────────────
-    # 16:45 Asia/Jerusalem = 09:45 US/Eastern (both timezones shift together
-    # for DST, so this is always correct regardless of season)
     SCAN_TZ   = "Asia/Jerusalem"
     SCAN_HOUR = 16
     SCAN_MIN  = 45
@@ -127,7 +112,7 @@ def run_daemon() -> None:
     scheduler.add_job(
         run_once,
         trigger=CronTrigger(
-            day_of_week="mon-fri",  # market days only
+            day_of_week="mon-fri",
             hour=SCAN_HOUR,
             minute=SCAN_MIN,
             timezone=SCAN_TZ,
@@ -135,18 +120,19 @@ def run_daemon() -> None:
         id="daily_agent_run",
         name=f"Daily Options Agent ({SCAN_HOUR:02d}:{SCAN_MIN:02d} Israel)",
         replace_existing=True,
-        misfire_grace_time=300,  # allow up to 5 min late start
+        misfire_grace_time=300,
     )
     scheduler.start()
 
     next_run = scheduler.get_job("daily_agent_run").next_run_time
+    env_label = os.getenv("RAILWAY_ENVIRONMENT", "local")
     logger.info("╔══════════════════════════════════════════════╗")
     logger.info("║   Daemon Mode — Scheduler + Telegram Bot     ║")
     logger.info("╚══════════════════════════════════════════════╝")
-    logger.info("Scheduled daily at %02d:%02d %s (Mon–Fri)", SCAN_HOUR, SCAN_MIN, SCAN_TZ)
-    logger.info("Next run: %s", next_run)
+    logger.info("Environment : %s", env_label)
+    logger.info("Schedule    : %02d:%02d %s (Mon–Fri)", SCAN_HOUR, SCAN_MIN, SCAN_TZ)
+    logger.info("Next run    : %s", next_run)
 
-    # ── Telegram bot (blocks until Ctrl-C) ────────────────────────────────
     try:
         run_bot()
     except (KeyboardInterrupt, SystemExit):
@@ -160,11 +146,32 @@ def run_daemon() -> None:
 # Entry point
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="Autonomous Trading Agent",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  python run_agent.py         # daemon mode (Railway production)\n"
+            "  python run_agent.py --once  # single run and exit\n"
+        ),
+    )
+    p.add_argument(
+        "--once",
+        action="store_true",
+        help="Run the options agent once and exit (no scheduler or Telegram bot)",
+    )
+    # Keep --daemon as a no-op alias so old invocations don't break
+    p.add_argument("--daemon", action="store_true", help=argparse.SUPPRESS)
+    return p
+
+
 def main() -> None:
-    if "--daemon" in sys.argv:
-        run_daemon()
-    else:
+    args = _build_parser().parse_args()
+    if args.once:
         run_once()
+    else:
+        run_daemon()   # default: daemon (scheduler + Telegram)
 
 
 if __name__ == "__main__":

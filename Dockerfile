@@ -1,29 +1,31 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# Autonomous Trading Agent — Dockerfile
+# Autonomous Trading Agent — Production Dockerfile
 #
-# Includes:
-#   - Python 3.13 slim (Debian Bookworm)
-#   - Correct Israel timezone (Asia/Jerusalem)
-#   - Google Chrome via official APT repo (stable, not fragile .deb download)
-#   - Selenium + webdriver-manager (auto-matches ChromeDriver to Chrome)
-#   - python-telegram-bot, APScheduler, all scraping libs
+# Base  : python:3.13-slim (Debian Bookworm, amd64)
+# User  : non-root 'agent' (UID 1000) for Railway/VPS security
+# Chrome: installed from Google's official APT repo (stable, auto-updates)
+# Driver: webdriver-manager downloads ChromeDriver at first run, cached in
+#         /app/drivers/ (WDM_LOCAL=1) — survives image rebuilds via a volume
 #
-# Build:   docker build -t trading-agent .
-# One-off: docker run --env-file .env trading-agent python run_agent.py
-# Daemon:  docker compose up -d
+# Build:
+#   docker build -t trading-agent .
+#
+# Run (Railway sets CMD automatically from Dockerfile):
+#   python run_agent.py          # daemon: scheduler 16:45 IL + Telegram bot
+#   python run_agent.py --once   # single options-agent run and exit
 # ──────────────────────────────────────────────────────────────────────────────
 
 FROM python:3.13-slim
 
-# ── Timezone — must be set before tzdata installs ────────────────────────────
+# ── Timezone (Israel) — set before any apt install ────────────────────────────
 ENV TZ=Asia/Jerusalem
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ── System packages (single layer for smaller image) ─────────────────────────
+# ── System packages in ONE layer ──────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Core tools
+    # Essentials
     wget gnupg ca-certificates tzdata gcc \
-    # Chrome runtime shared libraries (headless — no audio/GPU)
+    # Chrome shared libraries (headless — no audio, no GPU, no Wayland)
     fonts-liberation \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
@@ -43,7 +45,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Google Chrome via official APT repository (more stable than direct .deb) ─
+# ── Google Chrome — official APT repository ───────────────────────────────────
 RUN wget -qO- https://dl.google.com/linux/linux_signing_key.pub \
         | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] \
@@ -53,36 +55,32 @@ RUN wget -qO- https://dl.google.com/linux/linux_signing_key.pub \
     && apt-get install -y --no-install-recommends google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Python dependencies ───────────────────────────────────────────────────────
+# ── Python environment ────────────────────────────────────────────────────────
 WORKDIR /app
 
-# Copy requirements first so this layer is cached unless requirements change
+# Install deps before copying code — layer is cached until requirements change
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir \
-        "python-telegram-bot>=21.0" \
-        "apscheduler>=3.10" \
-        "selenium>=4.15" \
-        "webdriver-manager>=4.0"
+    && pip install --no-cache-dir -r requirements.txt
 
 # ── Application code ──────────────────────────────────────────────────────────
 COPY . .
 
-# ── Runtime environment ───────────────────────────────────────────────────────
+# ── Runtime environment variables ────────────────────────────────────────────
 ENV PYTHONUNBUFFERED=1
-# Tell Chrome to run headless (read by tradingview_service.py)
+ENV PYTHONDONTWRITEBYTECODE=1
+# Chrome flags for containers
 ENV CHROME_HEADLESS=1
-# Suppress verbose webdriver-manager download logs
+# Suppress webdriver-manager download noise
 ENV WDM_LOG=0
-# Use a project-local driver cache so the non-root user can write to it
+# Cache ChromeDriver inside the project dir so non-root user can write to it
 ENV WDM_LOCAL=1
 
-# ── Non-root user (security best practice) ────────────────────────────────────
-# Create user BEFORE chown — single layer
+# ── Non-root user (required by Railway and security best practice) ─────────────
 RUN useradd -m -u 1000 agent \
+    && mkdir -p /app/drivers /app/chrome_profile \
     && chown -R agent:agent /app
 USER agent
 
-# ── Default: daemon mode (scheduler 16:45 Israel + Telegram bot) ─────────────
-CMD ["python", "run_agent.py", "--daemon"]
+# ── Start daemon: scheduler (16:45 Israel) + Telegram bot ────────────────────
+CMD ["python", "run_agent.py"]

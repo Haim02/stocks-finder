@@ -10,9 +10,9 @@ class Settings(BaseSettings):
     # Priority: Railway injects MONGODB_URL; local .env uses MONGO_URI.
     # Falls back to the Atlas URI if neither is set.
     MONGO_URI: str = (
-        os.getenv("MONGODB_URL")    # Railway variable name
-        or os.getenv("MONGO_URI")   # local .env / other platforms
-        or "mongodb+srv://haim:951753@cluster0.u9pa2yh.mongodb.net/"
+        os.getenv("MONGODB_URL")         # Railway variable name (injected automatically)
+        or os.getenv("MONGO_URI")        # local .env / other platforms
+        or "mongodb://localhost:27017"   # local dev fallback (no credentials needed)
     )
     DB_NAME: str = "stocks_finder"
 

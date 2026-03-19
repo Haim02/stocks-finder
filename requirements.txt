@@ -1,28 +1,52 @@
+# ── Web framework (FastAPI) ───────────────────────────────────────────────────
 fastapi
 uvicorn
-python-dotenv
-finnhub-python
-pydantic-settings
+python-multipart
+jinja2
+
+# ── Database ──────────────────────────────────────────────────────────────────
+pymongo
+certifi
 sqlalchemy
 psycopg2-binary
+
+# ── Settings / environment ────────────────────────────────────────────────────
+python-dotenv
+pydantic-settings
+
+# ── Data & ML ─────────────────────────────────────────────────────────────────
 yfinance
 pandas
-ta
-openai
-resend
-jinja2
-python-multipart
-tradingview-screener
 pandas-ta
-requests
-beautifulsoup4
-pymongo
+ta
 scikit-learn
 joblib
-tenacity
-certifi
-cloudscraper
-pytz
 xgboost
-python-telegram-bot
-apscheduler
+numpy
+
+# ── AI / LLM ──────────────────────────────────────────────────────────────────
+openai
+
+# ── Market data APIs ──────────────────────────────────────────────────────────
+finnhub-python
+tradingview-screener
+requests
+beautifulsoup4
+cloudscraper
+
+# ── Email ─────────────────────────────────────────────────────────────────────
+resend
+
+# ── Scraping — Selenium + Chrome (TradingView) ────────────────────────────────
+selenium>=4.15
+webdriver-manager>=4.0
+
+# ── Telegram bot ──────────────────────────────────────────────────────────────
+python-telegram-bot>=21.0
+
+# ── Scheduler ─────────────────────────────────────────────────────────────────
+apscheduler>=3.10
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+tenacity
+pytz
