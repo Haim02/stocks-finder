@@ -68,7 +68,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "פקודות זמינות:\n"
         "/status — בדיקת שוק (VIX + מאקרו)\n"
         "/options — הגדרת ספרד 0DTE SPX להיום\n"
-        "/scan — הפעל סריקה מלאה של הסוכן (ברקע)\n"
+        "/scan — סריקת חדשות + טכני (שני מקורות)\n"
+        "   `/scan finviz` — Finviz בלבד\n"
+        "   `/scan tv` — TradingView בלבד\n"
+        "   `/scan both` — שניהם (ברירת מחדל)\n"
         "/analyze TICKER — ניתוח עמוק למניה ספציפית\n"
         "   _דוגמה: /analyze AAPL_\n",
         parse_mode=ParseMode.MARKDOWN,
@@ -158,54 +161,69 @@ async def cmd_options(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 
+_VALID_SOURCES = {"finviz", "tv", "both"}
+_SOURCE_LABEL  = {
+    "finviz": "Finviz בלבד",
+    "tv":     "TradingView בלבד",
+    "both":   "Finviz + TradingView (מיזוג)",
+}
+
+
 async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /scan [finviz|tv|both]
+
+    Runs the hybrid news + technical scan via run_news_scan.run_hybrid_scan().
+      /scan          → both sources (default)
+      /scan finviz   → Finviz only
+      /scan tv       → TradingView only (requires Selenium/Chrome)
+      /scan both     → explicit merge of both
+    """
     if not _is_authorized(update):
         return
+
+    # Parse optional source argument
+    raw_args = context.args
+    if raw_args:
+        source = raw_args[0].lower()
+        if source not in _VALID_SOURCES:
+            await update.message.reply_text(
+                f"⚠️ מקור לא תקין: `{source}`\n"
+                f"אפשרויות: `finviz` \\| `tv` \\| `both`",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+            return
+    else:
+        source = "both"
 
     if not _scan_lock.acquire(blocking=False):
         await update.message.reply_text("⚠️ סריקה כבר פועלת ברקע — המתן לסיומה.")
         return
 
+    label = _SOURCE_LABEL[source]
     await update.message.reply_text(
-        "🚀 *מפעיל סריקת סוכן מלאה...*\n"
-        "הסוכן יבחן מצב שוק, יסרוק מניות ויבנה אופציות.\n"
-        "תקבל הודעה עם התוצאה בסיום.",
+        f"🔍 *מפעיל סריקת חדשות — {label}*\n"
+        f"סורק מניות, מנתח חדשות ומשקלל AI...\n"
+        f"תקבל דוח במייל ✉️ ועדכון כאן בסיום.",
         parse_mode=ParseMode.MARKDOWN,
     )
 
-    def _run_in_thread():
+    def _run_news_scan():
         try:
-            from app.agent.trading_agent import TradingAgent
-            agent   = TradingAgent()
-            summary = agent.run()
-            log     = agent.tool_call_log
-            n_calls = len(log)
-            ok      = sum(1 for e in log if "error" not in e["result"])
-            result_text = (
-                f"✅ *סריקה הושלמה*\n\n"
-                f"כלי שהופעלו: `{n_calls}` (✓{ok} / ✗{n_calls - ok})\n\n"
-                f"*סיכום:*\n{summary[:800]}"
-            )
+            from run_news_scan import run_hybrid_scan
+            summary = run_hybrid_scan(source=source)
+            notify_trade(f"📰 *{label} — הושלמה*\n\n{summary}")
         except Exception as exc:
-            logger.exception("Background agent run failed")
-            result_text = f"❌ *הסריקה נכשלה*\n\n`{exc}`"
+            logger.exception("[Telegram] News scan (%s) failed", source)
+            notify_trade(f"❌ *סריקה נכשלה ({source})*\n`{exc}`")
         finally:
             _scan_lock.release()
 
-        # Send result back to Telegram
-        import asyncio
-        if _app:
-            asyncio.run_coroutine_threadsafe(
-                _app.bot.send_message(
-                    chat_id=settings.TELEGRAM_CHAT_ID,
-                    text=result_text,
-                    parse_mode=ParseMode.MARKDOWN,
-                ),
-                _app.update_queue._loop if hasattr(_app.update_queue, "_loop")
-                else _get_event_loop(),
-            )
-
-    threading.Thread(target=_run_in_thread, daemon=True, name="agent-scan").start()
+    threading.Thread(
+        target=_run_news_scan,
+        daemon=True,
+        name=f"news-scan-{source}",
+    ).start()
 
 
 async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
