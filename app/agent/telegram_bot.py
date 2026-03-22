@@ -23,6 +23,7 @@ Usage (integrated):
     The bot is started as a background thread by run_agent.py --daemon.
 """
 
+import asyncio
 import logging
 import threading
 from datetime import datetime
@@ -549,6 +550,308 @@ async def cmd_trade_check(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(f"❌ שגיאה ב-trade check עבור {ticker}: {exc}")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Script runner commands — every scan script is reachable from Telegram
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def cmd_daily_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Run the full daily TA stock scan and send email report."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text(
+        "📊 *Daily Scan started...*\n"
+        "Running TA analysis on all candidates.\n"
+        "You will receive an email when done.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    try:
+        await asyncio.to_thread(_sync_daily_scan)
+        await update.message.reply_text("✅ *Daily Scan complete!* Check your email.", parse_mode=ParseMode.MARKDOWN)
+    except Exception as exc:
+        logger.exception("cmd_daily_scan failed")
+        await update.message.reply_text(f"❌ Daily scan failed: {exc}")
+
+def _sync_daily_scan():
+    from run_daily_scan import run_scan
+    run_scan()
+
+
+async def cmd_options_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Run the daily options brief (Finviz + XGBoost + SPX 0DTE + stock spreads)."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text(
+        "🎯 *Options Scan started...*\n"
+        "Scanning Finviz, filtering with XGBoost,\n"
+        "building SPX 0DTE + stock credit spreads.\n"
+        "Email coming shortly.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    try:
+        await asyncio.to_thread(_sync_options_scan)
+        await update.message.reply_text("✅ *Options Brief sent!* Check your email.", parse_mode=ParseMode.MARKDOWN)
+    except Exception as exc:
+        logger.exception("cmd_options_scan failed")
+        await update.message.reply_text(f"❌ Options scan failed: {exc}")
+
+def _sync_options_scan():
+    from run_options_scan import run_options_scan
+    run_options_scan()
+
+
+async def cmd_smart_money(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Run the Smart Money / Wyckoff institutional accumulation scanner."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text(
+        "🦅 *Smart Money Scan started...*\n"
+        "Detecting Wyckoff accumulation patterns\n"
+        "and institutional activity.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    try:
+        await asyncio.to_thread(_sync_smart_money)
+        await update.message.reply_text("✅ *Smart Money scan complete!* Check your email.", parse_mode=ParseMode.MARKDOWN)
+    except Exception as exc:
+        logger.exception("cmd_smart_money failed")
+        await update.message.reply_text(f"❌ Smart Money scan failed: {exc}")
+
+def _sync_smart_money():
+    from run_smart_money import run_smart_money_tracker
+    run_smart_money_tracker()
+
+
+async def cmd_news_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Run the news scanner and send alerts for significant headlines."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text(
+        "📰 *News Scan started...*\n"
+        "Scanning latest market-moving headlines.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    try:
+        await asyncio.to_thread(_sync_news_scan)
+        await update.message.reply_text("✅ *News scan complete!*", parse_mode=ParseMode.MARKDOWN)
+    except Exception as exc:
+        logger.exception("cmd_news_scan failed")
+        await update.message.reply_text(f"❌ News scan failed: {exc}")
+
+def _sync_news_scan():
+    from run_news_scan import run_hybrid_scan
+    run_hybrid_scan(source="both")
+
+
+async def cmd_market_intelligence(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Run market intelligence analysis (macro + sector rotation)."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text(
+        "🧠 *Market Intelligence started...*\n"
+        "Analyzing macro context, sector rotation,\n"
+        "and institutional positioning.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    try:
+        await asyncio.to_thread(_sync_market_intelligence)
+        await update.message.reply_text("✅ *Market Intelligence complete!* Check your email.", parse_mode=ParseMode.MARKDOWN)
+    except Exception as exc:
+        logger.exception("cmd_market_intelligence failed")
+        await update.message.reply_text(f"❌ Market Intelligence failed: {exc}")
+
+def _sync_market_intelligence():
+    from run_market_intelligence import run_market_intelligence
+    run_market_intelligence()
+
+
+async def cmd_otc_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Run the OTC penny stock scanner."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text(
+        "🔬 *OTC Scan started...*\n"
+        "Scanning OTC markets for unusual activity.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    try:
+        await asyncio.to_thread(_sync_otc_scan)
+        await update.message.reply_text("✅ *OTC scan complete!* Check your email.", parse_mode=ParseMode.MARKDOWN)
+    except Exception as exc:
+        logger.exception("cmd_otc_scan failed")
+        await update.message.reply_text(f"❌ OTC scan failed: {exc}")
+
+def _sync_otc_scan():
+    from run_otc_scan import run_otc_pipeline
+    run_otc_pipeline()
+
+
+async def cmd_train_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Retrain the XGBoost ML model on the latest market data."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text(
+        "🤖 *Model Training started...*\n"
+        "This may take several minutes.\n"
+        "Training XGBoost on latest market data.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    try:
+        await asyncio.to_thread(_sync_train_model)
+        await update.message.reply_text("✅ *Model training complete!* New model is live.", parse_mode=ParseMode.MARKDOWN)
+    except Exception as exc:
+        logger.exception("cmd_train_model failed")
+        await update.message.reply_text(f"❌ Model training failed: {exc}")
+
+def _sync_train_model():
+    from train_model import train_xgb_model
+    train_xgb_model()
+
+
+async def cmd_analyze_ticker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /analyze TICKER — quick options-focused analysis: IV rank, best strategy, TA summary.
+    For a full Goldman Sachs deep-dive email report, use /deepdive TICKER.
+    """
+    if not _is_authorized(update):
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "📌 Usage: `/analyze TICKER`\nExample: `/analyze AAPL`\n\n"
+            "_For a full GS research note + email: /deepdive AAPL_",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    ticker = context.args[0].upper().strip()
+    if not ticker.isalpha() or len(ticker) > 10:
+        await update.message.reply_text(f"⚠️ Invalid ticker: `{ticker}`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    await update.message.reply_text(f"🔍 Analyzing *{ticker}*...", parse_mode=ParseMode.MARKDOWN)
+
+    try:
+        result = await asyncio.to_thread(_sync_analyze_ticker, ticker)
+        try:
+            await update.message.reply_text(result, parse_mode=ParseMode.MARKDOWN)
+        except Exception:
+            await update.message.reply_text(result)
+    except Exception as exc:
+        logger.exception("cmd_analyze_ticker failed for %s", ticker)
+        await update.message.reply_text(f"❌ Analysis of {ticker} failed: {exc}")
+
+def _sync_analyze_ticker(ticker: str) -> str:
+    import yfinance as yf
+    from app.services.options_strategy_engine import OptionsStrategyEngine
+    from app.services.iv_calculator import (
+        get_iv_rank, get_current_iv, get_vix_level,
+        check_earnings_soon, get_nearest_expiry,
+    )
+
+    engine   = OptionsStrategyEngine()
+    stock    = yf.Ticker(ticker)
+    price    = stock.fast_info.last_price
+    if not price:
+        return f"❌ Could not fetch price for *{ticker}*"
+
+    iv_rank  = get_iv_rank(ticker)
+    curr_iv  = get_current_iv(ticker)
+    vix      = get_vix_level()
+    earnings = check_earnings_soon(ticker, days=7)
+    expiry   = get_nearest_expiry(ticker, 35)
+
+    # Quick technicals from 3-month history
+    try:
+        hist  = stock.history(period="3mo")["Close"]
+        sma50 = float(hist.rolling(50).mean().iloc[-1]) if len(hist) >= 50 else None
+        delta = hist.diff()
+        gain  = delta.clip(lower=0).rolling(14).mean().iloc[-1]
+        loss  = (-delta.clip(upper=0)).rolling(14).mean().iloc[-1]
+        rsi   = round(100 - 100 / (1 + gain / max(loss, 1e-9)), 1) if len(hist) >= 14 else 50.0
+        if sma50 and price > sma50 * 1.02:
+            trend = "bullish"
+        elif sma50 and price < sma50 * 0.98:
+            trend = "bearish"
+        else:
+            trend = "neutral"
+    except Exception:
+        rsi, trend = 50.0, "neutral"
+
+    # Find best strategy
+    best = None
+    for t in (trend, "neutral", "bullish", "bearish"):
+        sig = engine.select_strategy(
+            ticker=ticker, price=price, trend=t,  # type: ignore[arg-type]
+            iv_rank=iv_rank, rsi=rsi, vix_level=vix,
+            has_earnings_soon=earnings,
+        )
+        if sig:
+            best = sig
+            break
+
+    iv_bar   = "🔥" * min(5, int(iv_rank / 20))
+    rsi_tag  = "🟢 Oversold" if rsi < 35 else ("🔴 Overbought" if rsi > 65 else "🟡 Neutral")
+    header   = (
+        f"📊 *{ticker}* — Quick Analysis\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💹 Price: `${price:.2f}`\n"
+        f"📈 IV Rank: `{iv_rank:.0f}%` {iv_bar}\n"
+        f"📊 Current IV: `{curr_iv * 100:.1f}%`\n"
+        f"📐 RSI(14): `{rsi:.1f}` — {rsi_tag}\n"
+        f"📉 Trend vs SMA50: `{trend.upper()}`\n"
+        f"📅 Nearest expiry: `{expiry}`\n"
+        f"⚠️ Earnings soon: `{'YES' if earnings else 'No'}`\n"
+        f"🌡️ VIX: `{vix:.1f}`\n\n"
+    )
+
+    if best:
+        return header + engine.format_telegram_message(best)
+
+    iv_env = (
+        "HIGH — consider selling premium" if iv_rank > 50
+        else ("LOW — consider buying options" if iv_rank < 25 else "MEDIUM")
+    )
+    return (
+        header
+        + f"💡 IV Environment: *{iv_env}*\n"
+        + "⚠️ No clear strategy signal at current conditions.\n"
+        + "Check back when IVR moves above 30 or below 25."
+    )
+
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show all available bot commands."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text(
+        "🤖 *stocks-finder Bot — All Commands*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "📊 *Scans (trigger email reports):*\n"
+        "/dailyscan — Full daily TA stock scan\n"
+        "/optionsscan — Daily options brief (SPX + stocks)\n"
+        "/smartmoney — Wyckoff institutional accumulation\n"
+        "/news — Latest market-moving news scan\n"
+        "/intelligence — Macro + sector rotation analysis\n"
+        "/otc — OTC penny stock scanner\n\n"
+        "🎯 *Options Strategy:*\n"
+        "/strategies — Scan top Finviz tickers for best strategy\n"
+        "/strategies AAPL TSLA — Specific tickers\n"
+        "/analyze TICKER — Quick IV rank + best strategy\n"
+        "/trade\\_check TICKER — Deep IV + TA + Wheel/Spread rec.\n"
+        "/quick\\_scan — Compact Ticker|Strategy|PoP|Income list\n\n"
+        "🔬 *Research:*\n"
+        "/deepdive TICKER — Goldman Sachs note + email report\n\n"
+        "🤖 *Model:*\n"
+        "/train — Retrain XGBoost ML model\n\n"
+        "ℹ️ *System:*\n"
+        "/status — Market snapshot (VIX + macro)\n"
+        "/options — 0DTE SPX Iron Condor setup\n"
+        "/help — This message\n\n"
+        "📅 *Auto-schedule:* Daily scan Mon–Fri 16:45 Israel time",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
 def _get_event_loop():
     import asyncio
     try:
@@ -604,14 +907,30 @@ def build_app() -> Application:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set in .env")
 
     app = Application.builder().token(token).build()
+    # ── Core ──────────────────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",        cmd_start))
+    app.add_handler(CommandHandler("help",         cmd_help))
     app.add_handler(CommandHandler("status",       cmd_status))
     app.add_handler(CommandHandler("options",      cmd_options))
     app.add_handler(CommandHandler("scan",         cmd_scan))
-    app.add_handler(CommandHandler("analyze",      cmd_analyze))
+
+    # ── Deep dive GS research note + email (was /analyze) ────────────────────
+    app.add_handler(CommandHandler("deepdive",     cmd_analyze))
+
+    # ── Options strategy (quick + deep) ──────────────────────────────────────
+    app.add_handler(CommandHandler("analyze",      cmd_analyze_ticker))
     app.add_handler(CommandHandler("strategies",   cmd_strategies))
     app.add_handler(CommandHandler("quick_scan",   cmd_quick_scan))
     app.add_handler(CommandHandler("trade_check",  cmd_trade_check))
+
+    # ── Scan runners ─────────────────────────────────────────────────────────
+    app.add_handler(CommandHandler("dailyscan",    cmd_daily_scan))
+    app.add_handler(CommandHandler("optionsscan",  cmd_options_scan))
+    app.add_handler(CommandHandler("smartmoney",   cmd_smart_money))
+    app.add_handler(CommandHandler("news",         cmd_news_scan))
+    app.add_handler(CommandHandler("intelligence", cmd_market_intelligence))
+    app.add_handler(CommandHandler("otc",          cmd_otc_scan))
+    app.add_handler(CommandHandler("train",        cmd_train_model))
     _app = app
     return app
 
