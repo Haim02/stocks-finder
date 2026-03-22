@@ -67,13 +67,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "🤖 *Autonomous Trading Agent*\n\n"
         "פקודות זמינות:\n"
         "/status — בדיקת שוק (VIX + מאקרו)\n"
-        "/options — הגדרת ספרד 0DTE SPX להיום\n"
-        "/scan — סריקת חדשות + טכני (שני מקורות)\n"
-        "   `/scan finviz` — Finviz בלבד\n"
-        "   `/scan tv` — TradingView בלבד\n"
-        "   `/scan both` — שניהם (ברירת מחדל)\n"
-        "/analyze TICKER — ניתוח עמוק למניה ספציפית\n"
-        "   _דוגמה: /analyze AAPL_\n",
+        "/options — ספרד 0DTE SPX Iron Condor להיום\n"
+        "/scan — סריקת חדשות + טכני\n"
+        "   `/scan finviz` · `/scan tv` · `/scan both`\n"
+        "/analyze TICKER — ניתוח Goldman Sachs + דוח מייל\n"
+        "/strategies [TICKERS] — מנוע אסטרטגיות מלא\n"
+        "/quick_scan — סיכום מהיר: Ticker | Strategy | PoP | Income\n"
+        "/trade_check TICKER — ניתוח IV + מגמה + המלצת Wheel/Spread\n",
         parse_mode=ParseMode.MARKDOWN,
     )
 
@@ -308,6 +308,247 @@ async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     ).start()
 
 
+async def cmd_strategies(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /strategies [TICKER1 TICKER2 ...]
+
+    Run the multi-strategy options engine. Without args: scans top Finviz gainers/losers.
+    With args: analyze specific tickers only (max 8).
+    """
+    if not _is_authorized(update):
+        return
+
+    args = context.args
+    await update.message.reply_text("⏳ מריץ מנוע אסטרטגיות אופציות...")
+
+    try:
+        from app.services.options_strategy_engine import OptionsStrategyEngine
+        from app.services.iv_calculator import get_iv_rank, get_vix_level, check_earnings_soon
+        import yfinance as yf
+
+        engine    = OptionsStrategyEngine()
+        vix       = get_vix_level()
+        results   = []
+
+        if args:
+            tickers = [t.upper() for t in args[:8]]
+        else:
+            from app.services.finviz_service import FinvizService
+            tickers = FinvizService.get_bullish_tickers(n=6) + FinvizService.get_bearish_tickers(n=4)
+
+        for ticker in tickers[:10]:
+            try:
+                price = yf.Ticker(ticker).fast_info.last_price
+                if not price:
+                    continue
+                iv_rank  = get_iv_rank(ticker)
+                earnings = check_earnings_soon(ticker)
+                # Try neutral first; if no signal try bullish/bearish
+                for trend in ("neutral", "bullish", "bearish", "strong_bullish", "strong_bearish"):
+                    signal = engine.select_strategy(
+                        ticker=ticker, price=price, trend=trend,
+                        iv_rank=iv_rank, rsi=50.0, vix_level=vix,
+                        has_earnings_soon=earnings,
+                    )
+                    if signal:
+                        results.append(signal)
+                        break
+            except Exception:
+                continue
+
+        if not results:
+            await update.message.reply_text("⚠️ לא נמצאו אותות אסטרטגיה כעת.")
+            return
+
+        for signal in results:
+            msg = engine.format_telegram_message(signal)
+            try:
+                await update.message.reply_text(msg, parse_mode="Markdown")
+            except Exception:
+                await update.message.reply_text(msg)
+
+    except Exception as exc:
+        logger.exception("cmd_strategies failed")
+        await update.message.reply_text(f"❌ שגיאה במנוע אסטרטגיות: {exc}")
+
+
+async def cmd_quick_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /quick_scan
+
+    Returns a compact summary: Ticker | Strategy | PoP% | Est. Income
+    for the top opportunities right now.
+    """
+    if not _is_authorized(update):
+        return
+
+    await update.message.reply_text("⚡ סריקה מהירה...")
+
+    try:
+        from app.services.options_strategy_engine import OptionsStrategyEngine
+        from app.services.iv_calculator import get_iv_rank, get_vix_level, check_earnings_soon
+        from app.services.finviz_service import FinvizService
+        import yfinance as yf
+
+        engine  = OptionsStrategyEngine()
+        vix     = get_vix_level()
+        bull    = FinvizService.get_bullish_tickers(n=8)
+        bear    = FinvizService.get_bearish_tickers(n=8)
+        rows    = []
+
+        for ticker, trend_hint in [(t, "bullish") for t in bull] + [(t, "bearish") for t in bear]:
+            try:
+                price = yf.Ticker(ticker).fast_info.last_price
+                if not price:
+                    continue
+                iv_rank  = get_iv_rank(ticker)
+                earnings = check_earnings_soon(ticker)
+                signal   = engine.select_strategy(
+                    ticker=ticker, price=price, trend=trend_hint,
+                    iv_rank=iv_rank, rsi=50.0, vix_level=vix,
+                    has_earnings_soon=earnings,
+                )
+                if signal:
+                    income = (
+                        f"+${signal.net_credit:.2f}"
+                        if signal.net_credit > 0
+                        else f"-${signal.net_debit:.2f}"
+                    )
+                    cat = "🟢" if signal.category == "BULLISH" else ("🔴" if signal.category == "BEARISH" else "⚪")
+                    rows.append(
+                        f"{cat} `{ticker:<6}` | {signal.strategy_display:<22} | "
+                        f"PoP: `{signal.probability_of_profit:.0f}%` | `{income}`"
+                    )
+            except Exception:
+                continue
+
+        if not rows:
+            await update.message.reply_text("⚠️ אין הזדמנויות פעילות כרגע.")
+            return
+
+        header = (
+            f"⚡ *Quick Scan — {len(rows)} הזדמנויות*\n"
+            f"VIX: `{vix:.1f}`\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        )
+        await update.message.reply_text(
+            header + "\n".join(rows),
+            parse_mode="Markdown",
+        )
+
+    except Exception as exc:
+        logger.exception("cmd_quick_scan failed")
+        await update.message.reply_text(f"❌ שגיאה בסריקה מהירה: {exc}")
+
+
+async def cmd_trade_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /trade_check TICKER
+
+    Deep dive: IV Rank, earnings date, technicals → recommend best Wheel or Spread entry.
+    """
+    if not _is_authorized(update):
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "⚠️ נא לציין טיקר\\.  דוגמה: `/trade_check AAPL`",
+            parse_mode="Markdown",
+        )
+        return
+
+    ticker = context.args[0].upper().strip()
+    if not ticker.isalpha() or len(ticker) > 10:
+        await update.message.reply_text(f"⚠️ טיקר לא תקין: `{ticker}`", parse_mode="Markdown")
+        return
+
+    await update.message.reply_text(f"🔎 בודק {ticker}...")
+
+    try:
+        from app.services.options_strategy_engine import OptionsStrategyEngine
+        from app.services.iv_calculator import (
+            get_iv_rank, get_current_iv, get_vix_level,
+            check_earnings_soon, get_nearest_expiry,
+        )
+        import yfinance as yf
+
+        stock   = yf.Ticker(ticker)
+        price   = stock.fast_info.last_price
+        if not price:
+            await update.message.reply_text(f"⚠️ לא ניתן לטעון מחיר עבור `{ticker}`")
+            return
+
+        iv_rank  = get_iv_rank(ticker)
+        curr_iv  = get_current_iv(ticker)
+        earnings = check_earnings_soon(ticker, days=14)
+        vix      = get_vix_level()
+        expiry   = get_nearest_expiry(ticker, 35)
+
+        # Pull quick technicals
+        hist  = stock.history(period="3mo")
+        close = hist["Close"] if not hist.empty else None
+        sma50 = round(float(close.rolling(50).mean().iloc[-1]), 2) if close is not None and len(close) >= 50 else None
+        delta = close.diff()
+        gain  = delta.clip(lower=0).rolling(14).mean()
+        loss  = (-delta.clip(upper=0)).rolling(14).mean()
+        rsi   = round(100 - 100 / (1 + gain.iloc[-1] / max(loss.iloc[-1], 1e-9)), 1) if close is not None and len(close) >= 14 else 50.0
+
+        if sma50 and price > sma50 * 1.02:
+            trend = "bullish"
+        elif sma50 and price < sma50 * 0.98:
+            trend = "bearish"
+        else:
+            trend = "neutral"
+
+        engine = OptionsStrategyEngine()
+        best   = None
+        for t in (trend, "neutral", "bullish", "bearish"):
+            sig = engine.select_strategy(
+                ticker=ticker, price=price, trend=t,  # type: ignore[arg-type]
+                iv_rank=iv_rank, rsi=rsi, vix_level=vix,
+                has_earnings_soon=earnings,
+            )
+            if sig:
+                best = sig
+                break
+
+        # Summary header
+        iv_bar  = "🔥" * min(5, int(iv_rank / 20))
+        rsi_tag = "🟢 Oversold" if rsi < 35 else ("🔴 Overbought" if rsi > 65 else "🟡 Neutral")
+        header  = (
+            f"🔎 *Trade Check — {ticker}*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💰 Price: `${price:.2f}`\n"
+            f"📊 IV Rank: `{iv_rank:.0f}%` {iv_bar}\n"
+            f"📈 Current IV: `{curr_iv * 100:.1f}%`\n"
+            f"📐 RSI(14): `{rsi:.1f}` — {rsi_tag}\n"
+            f"📉 Trend vs SMA50: `{trend.upper()}`\n"
+            f"📅 Nearest expiry: `{expiry}`\n"
+            f"⚠️ Earnings soon (<14d): `{'YES' if earnings else 'No'}`\n"
+            f"🌡️ VIX: `{vix:.1f}`\n\n"
+        )
+
+        if best:
+            msg = header + engine.format_telegram_message(best)
+        else:
+            msg = header + (
+                f"_לא זוהה אות ברור עבור {ticker} כרגע._\n\n"
+                f"💡 *המלצה:* המתן לסיגנל ברור יותר.\n"
+                f"IVR נוכחי: {iv_rank:.0f}% — "
+                + ("שוק גבוה, המתן לירידה לפני כניסה" if iv_rank > 60 else
+                   "IVR נמוך — עדיף ספרד דביט אם יש מגמה")
+            )
+
+        try:
+            await update.message.reply_text(msg, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(msg)
+
+    except Exception as exc:
+        logger.exception("cmd_trade_check failed for %s", ticker)
+        await update.message.reply_text(f"❌ שגיאה ב-trade check עבור {ticker}: {exc}")
+
+
 def _get_event_loop():
     import asyncio
     try:
@@ -363,11 +604,14 @@ def build_app() -> Application:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set in .env")
 
     app = Application.builder().token(token).build()
-    app.add_handler(CommandHandler("start",   cmd_start))
-    app.add_handler(CommandHandler("status",  cmd_status))
-    app.add_handler(CommandHandler("options", cmd_options))
-    app.add_handler(CommandHandler("scan",    cmd_scan))
-    app.add_handler(CommandHandler("analyze", cmd_analyze))
+    app.add_handler(CommandHandler("start",        cmd_start))
+    app.add_handler(CommandHandler("status",       cmd_status))
+    app.add_handler(CommandHandler("options",      cmd_options))
+    app.add_handler(CommandHandler("scan",         cmd_scan))
+    app.add_handler(CommandHandler("analyze",      cmd_analyze))
+    app.add_handler(CommandHandler("strategies",   cmd_strategies))
+    app.add_handler(CommandHandler("quick_scan",   cmd_quick_scan))
+    app.add_handler(CommandHandler("trade_check",  cmd_trade_check))
     _app = app
     return app
 

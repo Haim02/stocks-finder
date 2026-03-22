@@ -207,8 +207,77 @@ def run_options_scan() -> None:
     ai_svc   = AIService()
     analysis = ai_svc.get_options_analysis(report)
 
+    # 7b. Multi-strategy options engine — select optimal strategy per ticker
+    from app.services.options_strategy_engine import OptionsStrategyEngine
+    from app.services.iv_calculator import get_iv_rank, get_vix_level, check_earnings_soon
+
+    strategy_engine  = OptionsStrategyEngine()
+    strategy_signals = []
+    vix_level        = report.get("vix") or get_vix_level()
+
+    for opt in report.get("stock_options", []):
+        t     = opt["ticker"]
+        price = opt.get("spot_price") or opt.get("price") or 0.0
+        if not price:
+            continue
+        try:
+            iv_rank  = get_iv_rank(t)
+            earnings = check_earnings_soon(t, days=7)
+
+            raw = opt.get("direction", "neutral").lower()
+            if raw == "bullish":
+                trend = "bullish"
+            elif raw == "bearish":
+                trend = "bearish"
+            else:
+                trend = "neutral"
+
+            rsi = opt.get("rsi", 50.0)
+
+            signal = strategy_engine.select_strategy(
+                ticker=t, price=price, trend=trend,
+                iv_rank=iv_rank, rsi=rsi, vix_level=vix_level,
+                has_earnings_soon=earnings, dte_preference=35,
+            )
+            if signal:
+                # Attach top headline as news pulse
+                headlines = opt.get("news_headlines", [])
+                if headlines:
+                    signal.news_pulse = headlines[0][:120]
+
+                signal.telegram_message = strategy_engine.format_telegram_message(signal)
+                strategy_signals.append(signal)
+
+                opt["strategy_signal"] = {
+                    "name":       signal.strategy_name,
+                    "display":    signal.strategy_display,
+                    "category":   signal.category,
+                    "credit":     signal.net_credit,
+                    "debit":      signal.net_debit,
+                    "max_profit": signal.max_profit,
+                    "max_loss":   signal.max_loss,
+                    "be_low":     signal.break_even_low,
+                    "be_high":    signal.break_even_high,
+                    "pop":        signal.probability_of_profit,
+                    "theta":      signal.theta_daily,
+                    "vega":       signal.vega_per_1pct,
+                    "expiry":     signal.expiry_date,
+                    "rationale":  signal.rationale,
+                }
+                logger.info(
+                    "[STRATEGY] %s → %s | PoP: %.0f%% | IV Rank: %.0f",
+                    t, signal.strategy_display, signal.probability_of_profit, iv_rank,
+                )
+            else:
+                logger.info("[STRATEGY] %s → No signal (IV Rank: %.0f, trend: %s)", t, iv_rank, trend)
+
+        except Exception as exc:
+            logger.warning("[STRATEGY ERROR] %s: %s", t, exc)
+
+    report["strategy_signals_count"] = len(strategy_signals)
+
     # 8. Send email
-    EmailService.send_options_report(report, analysis)
+    EmailService.send_options_report(report, analysis, strategy_signals=strategy_signals)
 
     # 9. Record sent tickers in cooldown collection
     sent_tickers = [opt["ticker"] for opt in report.get("stock_options", [])]

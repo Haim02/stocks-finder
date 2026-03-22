@@ -1838,6 +1838,253 @@ if settings.RESEND_API_KEY:
 import re as _re
 
 
+def _build_strategy_section_html(strategy_signals: list) -> str:
+    """
+    Build the color-coded strategy section HTML for the options email.
+    Sections: 🟢 BULLISH | 🔴 BEARISH | ⚪ NEUTRAL
+    Each trade row shows strikes, Greeks, R/R, news pulse.
+    """
+    if not strategy_signals:
+        return ""
+
+    def _row(s, bg: str) -> str:
+        credit_debit = (
+            f'<span style="color:#4ade80;">+${s.net_credit:.2f}</span>'
+            if s.net_credit > 0
+            else f'<span style="color:#f87171;">-${s.net_debit:.2f}</span>'
+        )
+        if s.strategy_name == "iron_condor":
+            strikes = f"P {s.leg1_strike}/{s.leg2_strike} · C {s.leg3_strike}/{s.leg4_strike}"
+        elif s.leg2_strike > 0:
+            strikes = f"{s.leg1_strike} / {s.leg2_strike}"
+        else:
+            strikes = str(s.leg1_strike)
+        max_p = f"${s.max_profit:.0f}" if s.max_profit < 9_999_990 else "∞"
+        max_l = f"${s.max_loss:.0f}"   if s.max_loss   < 9_999_990 else "∞"
+        theta = f"${s.theta_daily:+.2f}/d"    if s.theta_daily    else "—"
+        vega  = f"${s.vega_per_1pct:+.2f}/1%" if s.vega_per_1pct  else "—"
+        news  = (
+            f'<div style="font-size:11px;color:#94a3b8;margin-top:3px;">📰 {s.news_pulse[:100]}</div>'
+            if getattr(s, "news_pulse", "") else ""
+        )
+        return (
+            f'<tr style="background:{bg};border-bottom:1px solid #1e293b;">'
+            f'<td style="padding:10px 12px;font-weight:700;color:#e2e8f0;">{s.ticker}</td>'
+            f'<td style="padding:10px 12px;color:#cbd5e1;">{s.strategy_display}</td>'
+            f'<td style="padding:10px 12px;font-family:monospace;font-size:12px;color:#93c5fd;">{strikes}</td>'
+            f'<td style="padding:10px 12px;">{credit_debit}</td>'
+            f'<td style="padding:10px 12px;color:#4ade80;">{max_p}</td>'
+            f'<td style="padding:10px 12px;color:#f87171;">{max_l}</td>'
+            f'<td style="padding:10px 12px;color:#fbbf24;">{s.probability_of_profit:.0f}%</td>'
+            f'<td style="padding:10px 12px;color:#a78bfa;">{theta}</td>'
+            f'<td style="padding:10px 12px;color:#67e8f9;">{vega}</td>'
+            f'<td style="padding:10px 12px;color:#94a3b8;font-size:12px;">{s.expiry_date}{news}</td>'
+            f'<td style="padding:10px 12px;font-size:11px;color:#64748b;max-width:180px;">{s.rationale}</td>'
+            f'</tr>'
+        )
+
+    def _section(title: str, color: str, emoji: str, signals: list) -> str:
+        if not signals:
+            return ""
+        rows = "".join(
+            _row(s, "#0f172a" if i % 2 == 0 else "#111827")
+            for i, s in enumerate(signals)
+        )
+        return (
+            f'<div style="margin-bottom:20px;">'
+            f'<div style="background:{color};padding:10px 16px;border-radius:8px 8px 0 0;">'
+            f'<span style="color:white;font-weight:700;font-size:13px;letter-spacing:1px;">'
+            f'{emoji} {title} ({len(signals)} TRADES)</span></div>'
+            f'<div style="overflow-x:auto;">'
+            f'<table style="width:100%;border-collapse:collapse;font-size:12px;">'
+            f'<tr style="background:#1e293b;">'
+            f'<th style="padding:8px 12px;color:#94a3b8;text-align:left;">Ticker</th>'
+            f'<th style="padding:8px 12px;color:#94a3b8;text-align:left;">Strategy</th>'
+            f'<th style="padding:8px 12px;color:#94a3b8;text-align:left;">Strikes</th>'
+            f'<th style="padding:8px 12px;color:#94a3b8;text-align:left;">Credit/Debit</th>'
+            f'<th style="padding:8px 12px;color:#94a3b8;text-align:left;">Max Profit</th>'
+            f'<th style="padding:8px 12px;color:#94a3b8;text-align:left;">Max Loss</th>'
+            f'<th style="padding:8px 12px;color:#94a3b8;text-align:left;">PoP</th>'
+            f'<th style="padding:8px 12px;color:#94a3b8;text-align:left;">Theta</th>'
+            f'<th style="padding:8px 12px;color:#94a3b8;text-align:left;">Vega</th>'
+            f'<th style="padding:8px 12px;color:#94a3b8;text-align:left;">Expiry / News</th>'
+            f'<th style="padding:8px 12px;color:#94a3b8;text-align:left;">Rationale</th>'
+            f'</tr>'
+            f'{rows}'
+            f'</table></div></div>'
+        )
+
+    bullish = [s for s in strategy_signals if s.category == "BULLISH"]
+    bearish = [s for s in strategy_signals if s.category == "BEARISH"]
+    neutral = [s for s in strategy_signals if s.category == "NEUTRAL"]
+
+    return (
+        '<div style="margin:20px 0;padding:16px;background:#0d1117;border-radius:12px;'
+        'border:1px solid #374151;">'
+        '<div style="font-size:13px;font-weight:700;color:#e2e8f0;letter-spacing:2px;'
+        'margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid #374151;">'
+        '🎯 OPTIONS STRATEGY RECOMMENDATIONS — ENGINE v2</div>'
+        + _section("BULLISH OPPORTUNITIES", "#166534", "🟢", bullish)
+        + _section("BEARISH OPPORTUNITIES", "#7f1d1d", "🔴", bearish)
+        + _section("NEUTRAL / VOLATILITY PLAYS", "#1e293b", "⚪", neutral)
+        + '</div>'
+    )
+
+
+def generate_html_report(
+    strategy_signals: list,
+    vix: float = 20.0,
+    spx: float = 0.0,
+    scan_date: str = "",
+) -> str:
+    """
+    Standalone function: builds a complete analyst-grade HTML dashboard
+    from a list of StrategySignal objects.
+
+    Sections:
+      Header  — VIX level + Fear & Greed context
+      🟢 BULLISH OPPORTUNITIES (credit & debit)
+      🔴 BEARISH OPPORTUNITIES (credit & debit)
+      ⚪ NEUTRAL / VOLATILITY PLAYS
+    """
+    from datetime import datetime as _dt
+    if not scan_date:
+        scan_date = _dt.now().strftime("%Y-%m-%d %H:%M")
+
+    if vix > 30:
+        vix_label, vix_color, fg_label = "EXTREME FEAR", "#dc2626", "Premium very elevated — sell spreads wide"
+    elif vix > 20:
+        vix_label, vix_color, fg_label = "FEAR", "#d97706", "Above-average volatility — elevated premium"
+    elif vix > 15:
+        vix_label, vix_color, fg_label = "NEUTRAL", "#fbbf24", "Normal market conditions"
+    else:
+        vix_label, vix_color, fg_label = "GREED", "#16a34a", "Low volatility — prefer debit spreads"
+
+    bullish = [s for s in strategy_signals if s.category == "BULLISH"]
+    bearish = [s for s in strategy_signals if s.category == "BEARISH"]
+    neutral = [s for s in strategy_signals if s.category == "NEUTRAL"]
+
+    def _trade_card(s) -> str:
+        credit_debit = (
+            f'<span style="color:#4ade80;font-size:18px;font-weight:700;">+${s.net_credit:.2f} credit</span>'
+            if s.net_credit > 0
+            else f'<span style="color:#f87171;font-size:18px;font-weight:700;">-${s.net_debit:.2f} debit</span>'
+        )
+        if s.strategy_name == "iron_condor":
+            strikes_html = (
+                f'Sell P <b>{s.leg1_strike}</b> / Buy P <b>{s.leg2_strike}</b> &nbsp;·&nbsp; '
+                f'Sell C <b>{s.leg3_strike}</b> / Buy C <b>{s.leg4_strike}</b>'
+            )
+            why = f"Strikes at ~{s.target_delta:.2f}Δ — ±7.5% OTM for {s.probability_of_profit:.0f}% PoP"
+        elif s.strategy_name in ("bull_put_spread", "bear_call_spread"):
+            strikes_html = f'Short <b>{s.leg1_strike}</b> / Long <b>{s.leg2_strike}</b>'
+            why = f"Short at ~{s.target_delta:.2f}Δ → {s.probability_of_profit:.0f}% prob. of expiring worthless"
+        elif s.leg2_strike > 0:
+            strikes_html = f'<b>{s.leg1_strike}</b> / <b>{s.leg2_strike}</b>'
+            why = f"Defined-risk spread — {s.probability_of_profit:.0f}% PoP"
+        else:
+            strikes_html = f'<b>{s.leg1_strike}</b>'
+            why = f"Strike at ~{s.target_delta:.2f}Δ — {s.probability_of_profit:.0f}% PoP"
+
+        max_p = f"${s.max_profit:.0f}"     if s.max_profit < 9_999_990 else "Unlimited"
+        max_l = f"${s.max_loss:.0f}"       if s.max_loss   < 9_999_990 else "Unlimited"
+        theta = f"${s.theta_daily:+.2f}"   if s.theta_daily    else "—"
+        vega  = f"${s.vega_per_1pct:+.2f}" if s.vega_per_1pct  else "—"
+        news_block = (
+            f'<div style="background:#0f172a;border-right:2px solid #3b82f6;padding:8px 12px;'
+            f'border-radius:4px;margin-top:8px;font-size:12px;color:#94a3b8;">'
+            f'📰 <b style="color:#60a5fa;">News Pulse:</b> {s.news_pulse}</div>'
+            if getattr(s, "news_pulse", "") else ""
+        )
+        return (
+            f'<div style="background:#111827;border-radius:10px;padding:16px;margin-bottom:14px;'
+            f'border:1px solid #1e293b;">'
+            f'<div style="display:flex;justify-content:space-between;align-items:flex-start;'
+            f'flex-wrap:wrap;gap:8px;margin-bottom:10px;">'
+            f'<div>'
+            f'<span style="color:white;font-size:20px;font-weight:700;">{s.ticker}</span>'
+            f'&nbsp;<span style="color:#94a3b8;font-size:13px;">{s.strategy_display}</span>'
+            f'<div style="color:#64748b;font-size:11px;margin-top:2px;">'
+            f'${s.underlying_price:.2f} | IV Rank: {s.iv_rank:.0f}% | {s.expiry_date} ({s.dte} DTE)</div>'
+            f'</div><div>{credit_debit}</div></div>'
+            f'<div style="font-size:13px;color:#cbd5e1;margin-bottom:6px;">'
+            f'<b>Strikes:</b> {strikes_html}</div>'
+            f'<div style="font-size:11px;color:#64748b;font-style:italic;margin-bottom:10px;">'
+            f'ℹ️ {why}</div>'
+            f'<table style="width:100%;border-collapse:collapse;font-size:12px;">'
+            f'<tr>'
+            f'<td style="padding:4px 8px;color:#94a3b8;">Max Profit</td>'
+            f'<td style="padding:4px 8px;color:#4ade80;font-weight:700;">{max_p}</td>'
+            f'<td style="padding:4px 8px;color:#94a3b8;">Max Loss</td>'
+            f'<td style="padding:4px 8px;color:#f87171;font-weight:700;">{max_l}</td>'
+            f'<td style="padding:4px 8px;color:#94a3b8;">PoP</td>'
+            f'<td style="padding:4px 8px;color:#fbbf24;font-weight:700;">{s.probability_of_profit:.0f}%</td>'
+            f'</tr><tr>'
+            f'<td style="padding:4px 8px;color:#94a3b8;">Theta/day</td>'
+            f'<td style="padding:4px 8px;color:#a78bfa;">{theta}</td>'
+            f'<td style="padding:4px 8px;color:#94a3b8;">Vega/1%</td>'
+            f'<td style="padding:4px 8px;color:#67e8f9;">{vega}</td>'
+            f'<td style="padding:4px 8px;color:#94a3b8;">R/R</td>'
+            f'<td style="padding:4px 8px;color:#e2e8f0;">{s.risk_reward_ratio:.2f}</td>'
+            f'</tr><tr>'
+            f'<td style="padding:4px 8px;color:#94a3b8;">Break-evens</td>'
+            f'<td colspan="5" style="padding:4px 8px;color:#fbbf24;">'
+            f'${s.break_even_low:.2f} — ${s.break_even_high:.2f}</td>'
+            f'</tr></table>'
+            f'{news_block}'
+            f'<div style="margin-top:8px;padding:6px 10px;background:#0f172a;border-radius:4px;'
+            f'font-size:11px;color:#64748b;font-style:italic;">{s.rationale}</div>'
+            f'</div>'
+        )
+
+    def _category_block(title: str, color: str, emoji: str, signals: list) -> str:
+        if not signals:
+            return ""
+        cards = "".join(_trade_card(s) for s in signals)
+        return (
+            f'<div style="margin-bottom:24px;">'
+            f'<div style="background:{color};padding:12px 18px;border-radius:10px 10px 0 0;">'
+            f'<span style="color:white;font-weight:700;font-size:14px;letter-spacing:1px;">'
+            f'{emoji} {title} &nbsp;'
+            f'<span style="opacity:0.7;font-size:12px;">({len(signals)} trades)</span>'
+            f'</span></div>'
+            f'<div style="padding:16px;background:#0d1117;border-radius:0 0 10px 10px;'
+            f'border:1px solid #1e293b;border-top:none;">{cards}</div></div>'
+        )
+
+    return (
+        f'<div style="font-family:\'Segoe UI\',Arial,sans-serif;max-width:900px;margin:0 auto;'
+        f'background:#0d1117;padding:20px;color:#e2e8f0;">'
+        f'<div style="background:linear-gradient(135deg,#0f172a,#1e1b4b);border-radius:12px;'
+        f'padding:24px 30px;margin-bottom:24px;text-align:center;">'
+        f'<div style="font-size:11px;letter-spacing:3px;color:#64748b;margin-bottom:6px;">'
+        f'OPTIONS STRATEGY ENGINE · ANALYST DASHBOARD · {scan_date}</div>'
+        f'<h2 style="margin:0;font-size:22px;font-weight:700;color:white;">'
+        f'Market-Neutral &amp; Directional Options Scanner</h2>'
+        f'<div style="margin-top:14px;display:flex;justify-content:center;gap:20px;flex-wrap:wrap;">'
+        f'<div style="background:rgba(255,255,255,0.08);padding:8px 18px;border-radius:20px;">'
+        f'<span style="color:#94a3b8;">VIX</span> '
+        f'<span style="color:{vix_color};font-weight:700;font-size:18px;">{vix:.1f}</span>'
+        f'<span style="color:#64748b;font-size:11px;margin-right:6px;"> — {vix_label}</span>'
+        f'</div>'
+        + (
+            f'<div style="background:rgba(255,255,255,0.08);padding:8px 18px;border-radius:20px;">'
+            f'<span style="color:#94a3b8;">SPX</span> '
+            f'<span style="color:white;font-weight:700;">{spx:,.0f}</span></div>'
+            if spx else ""
+        )
+        + f'</div>'
+        f'<div style="margin-top:10px;font-size:12px;color:#64748b;font-style:italic;">{fg_label}</div>'
+        f'</div>'
+        + _category_block("BULLISH OPPORTUNITIES", "#14532d", "🟢", bullish)
+        + _category_block("BEARISH OPPORTUNITIES", "#7f1d1d", "🔴", bearish)
+        + _category_block("NEUTRAL / VOLATILITY PLAYS", "#1e293b", "⚪", neutral)
+        + '<div style="text-align:center;font-size:11px;color:#374151;padding-top:8px;">'
+        'Options Strategy Engine · Tastytrade Methodology · Not investment advice</div>'
+        '</div>'
+    )
+
+
 def _md_to_html(text: str) -> str:
     """
     Lightweight markdown → HTML for the AI analyst output.
@@ -2161,7 +2408,7 @@ class EmailService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def send_options_report(report: dict, ai_analysis: dict) -> None:
+    def send_options_report(report: dict, ai_analysis: dict, strategy_signals: list | None = None) -> None:
         """
         Sends the Daily Options Brief email.
         report      : dict from OptionsService.build_report()
@@ -2395,6 +2642,10 @@ class EmailService:
                 )
 
             html += '</div>'  # /stocks section
+
+        # ── Multi-strategy section (color-coded by category) ──────────
+        if strategy_signals:
+            html += _build_strategy_section_html(strategy_signals)
 
         # ── Market context footer ──────────────────────────────────────
         macro      = report.get("macro_context") or {}

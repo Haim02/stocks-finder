@@ -33,6 +33,7 @@ tradingview-screener
 requests
 beautifulsoup4
 cloudscraper
+finviz
 
 # ── Email ─────────────────────────────────────────────────────────────────────
 resend

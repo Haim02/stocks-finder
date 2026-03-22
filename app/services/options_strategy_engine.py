@@ -1,0 +1,545 @@
+"""
+Multi-strategy options engine.
+Selects the optimal strategy per ticker based on IV rank, trend, RSI, and VIX.
+
+Strategy rules (analyst-grade):
+  BULLISH (green):
+    bull_put_spread   — IVR > 30, RSI < 60, delta ~0.20          (credit)
+    cash_secured_put  — IVR > 50, bullish, oversold RSI < 35     (credit, 30-45 DTE)
+    bull_call_spread  — IVR < 25, trend strong_bullish            (debit)
+    long_call_leap    — IVR < 25, strong bullish, DTE > 60        (debit, stock replacement)
+    covered_call      — own shares, IVR > 30, RSI > 60           (credit)
+
+  BEARISH (red):
+    bear_call_spread  — IVR > 30, RSI > 65, delta ~0.20          (credit)
+    bear_put_spread   — IVR < 25, trend bearish                   (debit)
+
+  NEUTRAL / VOLATILITY (gray/orange):
+    iron_condor       — IVR > 50, neutral, profit zone 10-15%    (credit)
+    long_straddle     — IVR > 50 + earnings < 7 days             (debit)
+    short_strangle    — index ETFs only, VIX > 25                 (credit, undefined risk)
+
+Management rules:
+  - TAKE PROFIT          : current P&L ≥ 50 % of max profit
+  - TIME SENSITIVE       : DTE ≤ 21
+  - DANGER - ADJUST      : price at or beyond a break-even level
+"""
+import logging
+from typing import Literal, Optional
+
+from pydantic import BaseModel
+
+from app.services.iv_calculator import get_nearest_expiry
+
+logger = logging.getLogger(__name__)
+
+INDEX_ETFS: frozenset[str] = frozenset(
+    {"SPY", "QQQ", "IWM", "DIA", "XLF", "XLE", "XLK", "XBI", "GLD", "TLT"}
+)
+
+TrendType      = Literal["strong_bullish", "bullish", "neutral", "bearish", "strong_bearish"]
+CategoryType   = Literal["BULLISH", "BEARISH", "NEUTRAL"]
+ManagementStatus = Literal["OK", "TAKE PROFIT", "TIME SENSITIVE - MANAGE/ROLL", "DANGER - ADJUST"]
+
+
+class StrategySignal(BaseModel):
+    """Pydantic model representing a fully-defined options strategy recommendation."""
+
+    # ── Identity ──────────────────────────────────────────────────────────────
+    strategy_name:    str
+    strategy_display: str
+    category:         CategoryType
+    ticker:           str
+    underlying_price: float
+
+    # ── Strikes (0.0 = leg not used) ─────────────────────────────────────────
+    leg1_strike: float = 0.0
+    leg2_strike: float = 0.0
+    leg3_strike: float = 0.0
+    leg4_strike: float = 0.0
+
+    # ── P&L (dollars per contract, already × 100) ────────────────────────────
+    net_credit:           float = 0.0
+    net_debit:            float = 0.0
+    max_profit:           float = 0.0
+    max_loss:             float = 0.0
+    break_even_low:       float = 0.0
+    break_even_high:      float = 0.0
+    probability_of_profit: float = 0.0
+    risk_reward_ratio:    float = 0.0
+
+    # ── Greeks (estimated) ───────────────────────────────────────────────────
+    theta_daily:    float = 0.0   # daily time decay ($ per contract)
+    vega_per_1pct:  float = 0.0   # P&L change per 1 % IV move ($ per contract)
+
+    # ── Trade parameters ─────────────────────────────────────────────────────
+    expiry_date:   str   = ""
+    dte:           int   = 35
+    iv_rank:       float = 0.0
+    current_iv:    float = 0.0
+    target_delta:  float = 0.20
+
+    # ── Management ───────────────────────────────────────────────────────────
+    close_at_profit_pct: float = 0.50
+    manage_at_dte:       int   = 21
+    close_target_dollar: float = 0.0
+
+    # ── Strategy-specific extras ─────────────────────────────────────────────
+    return_on_capital: float = 0.0
+    annualized_return: float = 0.0
+    move_needed_pct:   float = 0.0
+
+    # ── Context ───────────────────────────────────────────────────────────────
+    rationale:        str = ""
+    market_condition: str = ""
+    telegram_message: str = ""
+    news_pulse:       str = ""   # populated externally from NewsScraper
+
+    class Config:
+        frozen = False
+
+
+class OptionsStrategyEngine:
+    """Select the best options strategy per ticker; format Telegram messages."""
+
+    # ── Public: strategy selector ────────────────────────────────────────────
+
+    def select_strategy(
+        self,
+        ticker:           str,
+        price:            float,
+        trend:            TrendType,
+        iv_rank:          float,
+        rsi:              float,
+        vix_level:        float,
+        has_earnings_soon: bool = False,
+        dte_preference:   int  = 35,
+        owns_shares:      bool = False,
+    ) -> Optional[StrategySignal]:
+        """
+        Return the optimal StrategySignal, or None if no edge is detected.
+
+        Priority order (top wins):
+          1. Earnings straddle
+          2. Iron Condor (neutral + high IV)
+          3. Bear Call Spread (overbought + high IV)
+          4. Bull Put Spread (bullish + IVR > 30 + RSI < 60)
+          5. Cash-Secured Put (oversold + high IV)
+          6. Covered Call (own shares)
+          7. Short Strangle (index ETF + VIX spike)
+          8. Bull Call Spread (low IV + bullish)
+          9. Long Call LEAP (low IV + strong bullish + long DTE)
+         10. Bear Put Spread (low IV + bearish)
+        """
+        kw = dict(ticker=ticker, price=price, iv_rank=iv_rank, dte=dte_preference)
+
+        if has_earnings_soon and iv_rank > 50:
+            s = self._build_long_straddle(**kw)
+            s.rationale = "Earnings play — large move expected, direction unknown"
+            return s
+
+        if iv_rank > 50 and trend == "neutral":
+            s = self._build_iron_condor(**kw)
+            s.rationale = "High IVR + neutral market — collect premium from both sides (10-15% profit zone)"
+            return s
+
+        if iv_rank > 30 and trend in ("neutral", "bearish", "strong_bearish") and rsi > 65:
+            s = self._build_bear_call_spread(**kw)
+            s.rationale = "High IVR + RSI overbought (>65) — sell call spread above resistance at ~0.20 delta"
+            return s
+
+        if iv_rank > 30 and trend in ("bullish", "neutral") and rsi < 60:
+            s = self._build_bull_put_spread(**kw)
+            s.rationale = "IVR > 30 + bullish bias + RSI < 60 — credit below support at ~0.20 delta, 68% PoP"
+            return s
+
+        if iv_rank > 50 and trend in ("bullish", "strong_bullish") and rsi < 35:
+            s = self._build_cash_secured_put(**kw)
+            s.rationale = "High IVR + oversold (RSI < 35) + bullish — get paid to buy the dip, 30-45 DTE"
+            return s
+
+        if owns_shares and iv_rank > 30 and rsi > 60:
+            s = self._build_covered_call(**kw)
+            s.rationale = "Own shares + elevated IVR + near resistance — generate monthly income"
+            return s
+
+        if vix_level > 25 and iv_rank > 60 and ticker in INDEX_ETFS:
+            s = self._build_short_strangle(**kw)
+            s.rationale = "VIX spike + index ETF — sell elevated vol premium (undefined risk, use stops)"
+            return s
+
+        if iv_rank < 25 and trend in ("bullish", "strong_bullish"):
+            s = self._build_bull_call_spread(**kw)
+            s.rationale = "Low IVR + bullish — cheap debit spread, defined risk, directional play"
+            return s
+
+        if iv_rank < 25 and trend == "strong_bullish" and dte_preference > 60:
+            s = self._build_long_call_leap(**kw)
+            s.rationale = "Low IVR + strong uptrend — cheap long-dated calls as stock replacement"
+            return s
+
+        if iv_rank < 25 and trend in ("bearish", "strong_bearish"):
+            s = self._build_bear_put_spread(**kw)
+            s.rationale = "Low IVR + bearish — debit put spread, defined risk, directional play"
+            return s
+
+        return None
+
+    # ── Public: management monitor ───────────────────────────────────────────
+
+    def check_management_status(
+        self,
+        signal:              StrategySignal,
+        current_price:       float,
+        current_dte:         int,
+        current_pnl_dollar:  float = 0.0,
+    ) -> ManagementStatus:
+        """
+        Evaluate a live position and return its management status.
+          TAKE PROFIT          → P&L ≥ 50 % of max profit
+          TIME SENSITIVE       → DTE ≤ manage_at_dte (default 21)
+          DANGER - ADJUST      → price at or beyond a break-even
+          OK                   → no action needed
+        """
+        if signal.max_profit > 0 and current_pnl_dollar >= signal.max_profit * signal.close_at_profit_pct:
+            return "TAKE PROFIT"
+        if current_dte <= signal.manage_at_dte:
+            return "TIME SENSITIVE - MANAGE/ROLL"
+        if signal.break_even_low > 0 and current_price <= signal.break_even_low:
+            return "DANGER - ADJUST"
+        if signal.break_even_high > 0 and current_price >= signal.break_even_high:
+            return "DANGER - ADJUST"
+        return "OK"
+
+    # ── Strategy builders ─────────────────────────────────────────────────────
+
+    def _build_iron_condor(self, ticker, price, iv_rank, dte) -> StrategySignal:
+        sp   = round(price * 0.925)   # short put  — 7.5 % OTM
+        lp   = round(price * 0.875)   # long put   — wing
+        sc   = round(price * 1.075)   # short call — 7.5 % OTM
+        lc   = round(price * 1.125)   # long call  — wing
+        wing   = sp - lp
+        credit = wing * 0.40
+        mp     = credit * 100
+        ml     = (wing - credit) * 100
+        be_l   = sp - credit
+        be_h   = sc + credit
+        pop    = min(75.0, 50 + (be_h - be_l) / price * 120)
+        rr     = mp / ml if ml else 0
+        theta  = mp / (dte * 2) if dte else 0
+        exp    = get_nearest_expiry(ticker, dte)
+        return StrategySignal(
+            strategy_name="iron_condor", strategy_display="Iron Condor 🦅",
+            category="NEUTRAL", ticker=ticker, underlying_price=price,
+            leg1_strike=sp, leg2_strike=lp, leg3_strike=sc, leg4_strike=lc,
+            net_credit=round(credit, 2), max_profit=round(mp, 2), max_loss=round(ml, 2),
+            break_even_low=round(be_l, 2), break_even_high=round(be_h, 2),
+            probability_of_profit=round(pop, 1), risk_reward_ratio=round(rr, 2),
+            theta_daily=round(theta, 2), vega_per_1pct=round(-ml / 50, 2),
+            target_delta=0.15,
+            expiry_date=exp, dte=dte, iv_rank=iv_rank,
+            close_target_dollar=round(credit * 0.50 * 100, 2), manage_at_dte=21,
+        )
+
+    def _build_bull_put_spread(self, ticker, price, iv_rank, dte) -> StrategySignal:
+        sp     = round(price * 0.95)   # short put ~0.20 delta
+        lp     = round(price * 0.90)   # long put
+        width  = sp - lp
+        credit = width * 0.40
+        mp     = credit * 100
+        ml     = (width - credit) * 100
+        be     = sp - credit
+        rr     = mp / ml if ml else 0
+        theta  = mp / (dte * 1.5) if dte else 0
+        exp    = get_nearest_expiry(ticker, dte)
+        return StrategySignal(
+            strategy_name="bull_put_spread", strategy_display="Bull Put Spread 📈",
+            category="BULLISH", ticker=ticker, underlying_price=price,
+            leg1_strike=sp, leg2_strike=lp,
+            net_credit=round(credit, 2), max_profit=round(mp, 2), max_loss=round(ml, 2),
+            break_even_low=round(be, 2), break_even_high=round(price * 1.20, 2),
+            probability_of_profit=68.0, risk_reward_ratio=round(rr, 2),
+            theta_daily=round(theta, 2), vega_per_1pct=round(-ml / 60, 2),
+            target_delta=0.20,
+            expiry_date=exp, dte=dte, iv_rank=iv_rank,
+            close_target_dollar=round(credit * 0.50 * 100, 2), manage_at_dte=21,
+        )
+
+    def _build_bear_call_spread(self, ticker, price, iv_rank, dte) -> StrategySignal:
+        sc     = round(price * 1.05)   # short call ~0.20 delta
+        lc     = round(price * 1.10)   # long call
+        width  = lc - sc
+        credit = width * 0.40
+        mp     = credit * 100
+        ml     = (width - credit) * 100
+        be     = sc + credit
+        rr     = mp / ml if ml else 0
+        theta  = mp / (dte * 1.5) if dte else 0
+        exp    = get_nearest_expiry(ticker, dte)
+        return StrategySignal(
+            strategy_name="bear_call_spread", strategy_display="Bear Call Spread 📉",
+            category="BEARISH", ticker=ticker, underlying_price=price,
+            leg1_strike=sc, leg2_strike=lc,
+            net_credit=round(credit, 2), max_profit=round(mp, 2), max_loss=round(ml, 2),
+            break_even_low=round(price * 0.80, 2), break_even_high=round(be, 2),
+            probability_of_profit=68.0, risk_reward_ratio=round(rr, 2),
+            theta_daily=round(theta, 2), vega_per_1pct=round(-ml / 60, 2),
+            target_delta=0.20,
+            expiry_date=exp, dte=dte, iv_rank=iv_rank,
+            close_target_dollar=round(credit * 0.50 * 100, 2), manage_at_dte=21,
+        )
+
+    def _build_cash_secured_put(self, ticker, price, iv_rank, dte) -> StrategySignal:
+        strike  = round(price * 0.95)
+        iv      = max(iv_rank / 100, 0.20)
+        dte_use = max(dte, 30)   # CSP: minimum 30 DTE
+        premium = strike * iv * 0.30 * (dte_use / 365) ** 0.5
+        mp      = premium * 100
+        ml      = (strike - premium) * 100
+        be      = strike - premium
+        roc     = (premium / strike) * 100
+        ann     = roc * (365 / dte_use)
+        theta   = mp / (dte_use * 2) if dte_use else 0
+        exp     = get_nearest_expiry(ticker, dte_use)
+        return StrategySignal(
+            strategy_name="cash_secured_put", strategy_display="Cash-Secured Put 💰",
+            category="BULLISH", ticker=ticker, underlying_price=price,
+            leg1_strike=strike,
+            net_credit=round(premium, 2), max_profit=round(mp, 2), max_loss=round(ml, 2),
+            break_even_low=round(be, 2), break_even_high=round(strike * 1.10, 2),
+            probability_of_profit=72.0,
+            theta_daily=round(theta, 2), vega_per_1pct=round(-ml / 80, 2),
+            target_delta=0.20,
+            expiry_date=exp, dte=dte_use, iv_rank=iv_rank,
+            close_target_dollar=round(premium * 0.50 * 100, 2), manage_at_dte=21,
+            return_on_capital=round(roc, 2), annualized_return=round(ann, 2),
+        )
+
+    def _build_covered_call(self, ticker, price, iv_rank, dte) -> StrategySignal:
+        strike  = round(price * 1.05)
+        iv      = max(iv_rank / 100, 0.20)
+        premium = price * iv * 0.25 * (dte / 365) ** 0.5
+        mp      = (strike - price + premium) * 100
+        ml      = (price - premium) * 100
+        be      = price - premium
+        roc     = (premium / price) * 100
+        ann     = roc * (365 / dte) if dte else 0
+        theta   = premium * 100 / (dte * 2) if dte else 0
+        exp     = get_nearest_expiry(ticker, dte)
+        return StrategySignal(
+            strategy_name="covered_call", strategy_display="Covered Call 📞",
+            category="BULLISH", ticker=ticker, underlying_price=price,
+            leg1_strike=strike,
+            net_credit=round(premium, 2), max_profit=round(mp, 2), max_loss=round(ml, 2),
+            break_even_low=round(be, 2), break_even_high=round(strike, 2),
+            probability_of_profit=70.0,
+            theta_daily=round(theta, 2), vega_per_1pct=round(-ml / 80, 2),
+            expiry_date=exp, dte=dte, iv_rank=iv_rank,
+            close_target_dollar=round(premium * 0.50 * 100, 2), manage_at_dte=21,
+            return_on_capital=round(roc, 2), annualized_return=round(ann, 2),
+        )
+
+    def _build_bull_call_spread(self, ticker, price, iv_rank, dte) -> StrategySignal:
+        lc    = round(price)           # buy ATM
+        sc    = round(price * 1.08)    # sell OTM
+        width = sc - lc
+        debit = width * 0.45
+        mp    = (width - debit) * 100
+        ml    = debit * 100
+        be    = lc + debit
+        rr    = mp / ml if ml else 0
+        theta = -ml / (dte * 3) if dte else 0
+        exp   = get_nearest_expiry(ticker, dte)
+        return StrategySignal(
+            strategy_name="bull_call_spread", strategy_display="Bull Call Spread 🐂",
+            category="BULLISH", ticker=ticker, underlying_price=price,
+            leg1_strike=lc, leg2_strike=sc,
+            net_debit=round(debit, 2), max_profit=round(mp, 2), max_loss=round(ml, 2),
+            break_even_low=round(be, 2), break_even_high=round(sc, 2),
+            probability_of_profit=47.0, risk_reward_ratio=round(rr, 2),
+            theta_daily=round(theta, 2), vega_per_1pct=round(ml / 80, 2),
+            expiry_date=exp, dte=dte, iv_rank=iv_rank,
+            close_target_dollar=round(mp * 0.50, 2), manage_at_dte=21,
+        )
+
+    def _build_bear_put_spread(self, ticker, price, iv_rank, dte) -> StrategySignal:
+        lp    = round(price)           # buy ATM
+        sp    = round(price * 0.92)    # sell OTM
+        width = lp - sp
+        debit = width * 0.45
+        mp    = (width - debit) * 100
+        ml    = debit * 100
+        be    = lp - debit
+        rr    = mp / ml if ml else 0
+        theta = -ml / (dte * 3) if dte else 0
+        exp   = get_nearest_expiry(ticker, dte)
+        return StrategySignal(
+            strategy_name="bear_put_spread", strategy_display="Bear Put Spread 🐻",
+            category="BEARISH", ticker=ticker, underlying_price=price,
+            leg1_strike=lp, leg2_strike=sp,
+            net_debit=round(debit, 2), max_profit=round(mp, 2), max_loss=round(ml, 2),
+            break_even_low=round(sp, 2), break_even_high=round(be, 2),
+            probability_of_profit=47.0, risk_reward_ratio=round(rr, 2),
+            theta_daily=round(theta, 2), vega_per_1pct=round(ml / 80, 2),
+            expiry_date=exp, dte=dte, iv_rank=iv_rank,
+            close_target_dollar=round(mp * 0.50, 2), manage_at_dte=21,
+        )
+
+    def _build_long_straddle(self, ticker, price, iv_rank, dte) -> StrategySignal:
+        strike    = round(price)
+        iv        = max(iv_rank / 100, 0.25)
+        dte_use   = min(dte, 7)   # earnings play — short dated
+        prem_each = price * iv * 0.40 * (dte_use / 365) ** 0.5
+        total     = prem_each * 2
+        ml        = total * 100
+        be_h      = strike + total
+        be_l      = strike - total
+        move_pct  = (total / price) * 100
+        theta     = -ml / (dte_use * 2) if dte_use else 0
+        exp       = get_nearest_expiry(ticker, dte_use)
+        return StrategySignal(
+            strategy_name="long_straddle", strategy_display="Long Straddle ⚡",
+            category="NEUTRAL", ticker=ticker, underlying_price=price,
+            leg1_strike=strike, leg2_strike=strike,
+            net_debit=round(total, 2), max_profit=9_999_999.0, max_loss=round(ml, 2),
+            break_even_low=round(be_l, 2), break_even_high=round(be_h, 2),
+            probability_of_profit=35.0,
+            theta_daily=round(theta, 2), vega_per_1pct=round(ml / 40, 2),
+            expiry_date=exp, dte=dte_use, iv_rank=iv_rank,
+            close_target_dollar=round(ml * 0.50, 2), manage_at_dte=2,
+            move_needed_pct=round(move_pct, 1),
+        )
+
+    def _build_long_call_leap(self, ticker, price, iv_rank, dte) -> StrategySignal:
+        strike  = round(price * 0.85)   # deep ITM ~0.75 delta
+        iv      = max(iv_rank / 100, 0.20)
+        dte_use = max(dte, 180)
+        premium = (price - strike) + price * iv * 0.20 * (dte_use / 365) ** 0.5
+        ml      = premium * 100
+        be      = strike + premium
+        theta   = -ml / (dte_use * 4) if dte_use else 0
+        exp     = get_nearest_expiry(ticker, dte_use)
+        return StrategySignal(
+            strategy_name="long_call_leap", strategy_display="Long Call LEAP 🚀",
+            category="BULLISH", ticker=ticker, underlying_price=price,
+            leg1_strike=strike,
+            net_debit=round(premium, 2), max_profit=9_999_999.0, max_loss=round(ml, 2),
+            break_even_low=round(be, 2), break_even_high=9_999_999.0,
+            probability_of_profit=65.0,
+            theta_daily=round(theta, 2), vega_per_1pct=round(ml / 60, 2),
+            expiry_date=exp, dte=dte_use, iv_rank=iv_rank,
+            close_target_dollar=round(ml * 0.50, 2), manage_at_dte=60,
+        )
+
+    def _build_short_strangle(self, ticker, price, iv_rank, dte) -> StrategySignal:
+        sp     = round(price * 0.93)
+        sc     = round(price * 1.07)
+        iv     = max(iv_rank / 100, 0.25)
+        prem   = price * iv * 0.20 * (dte / 365) ** 0.5
+        credit = prem * 2
+        mp     = credit * 100
+        be_l   = sp - credit
+        be_h   = sc + credit
+        theta  = mp / dte if dte else 0
+        exp    = get_nearest_expiry(ticker, dte)
+        return StrategySignal(
+            strategy_name="short_strangle", strategy_display="Short Strangle ⚠️",
+            category="NEUTRAL", ticker=ticker, underlying_price=price,
+            leg1_strike=sp, leg2_strike=sc,
+            net_credit=round(credit, 2), max_profit=round(mp, 2), max_loss=9_999_999.0,
+            break_even_low=round(be_l, 2), break_even_high=round(be_h, 2),
+            probability_of_profit=68.0,
+            theta_daily=round(theta, 2), vega_per_1pct=round(-mp / 30, 2),
+            expiry_date=exp, dte=dte, iv_rank=iv_rank,
+            close_target_dollar=round(credit * 0.50 * 100, 2), manage_at_dte=21,
+        )
+
+    # ── Telegram message formatter ────────────────────────────────────────────
+
+    def format_telegram_message(self, signal: StrategySignal) -> str:
+        """Return a Telegram-ready Markdown message for any StrategySignal."""
+        s = signal
+        n = s.strategy_name
+
+        if n == "iron_condor":
+            legs = (
+                f"  Sell Put `${s.leg1_strike}` / Buy Put `${s.leg2_strike}`\n"
+                f"  Sell Call `${s.leg3_strike}` / Buy Call `${s.leg4_strike}`\n"
+                f"  Net Credit: `${s.net_credit}`"
+            )
+        elif n == "bull_put_spread":
+            legs = (
+                f"  Sell Put `${s.leg1_strike}` / Buy Put `${s.leg2_strike}`\n"
+                f"  Net Credit: `${s.net_credit}` | Target delta: ~{s.target_delta}"
+            )
+        elif n == "bear_call_spread":
+            legs = (
+                f"  Sell Call `${s.leg1_strike}` / Buy Call `${s.leg2_strike}`\n"
+                f"  Net Credit: `${s.net_credit}` | Target delta: ~{s.target_delta}"
+            )
+        elif n == "cash_secured_put":
+            legs = (
+                f"  Sell Put `${s.leg1_strike}`\n"
+                f"  Premium: `${s.net_credit}` | Collateral: `${s.leg1_strike * 100:.0f}`\n"
+                f"  ROC: `{s.return_on_capital:.1f}%` (~`{s.annualized_return:.0f}%` ann.)"
+            )
+        elif n == "covered_call":
+            legs = (
+                f"  Sell Call `${s.leg1_strike}` (own 100 shares)\n"
+                f"  Premium: `${s.net_credit}`\n"
+                f"  ROC: `{s.return_on_capital:.1f}%` (~`{s.annualized_return:.0f}%` ann.)"
+            )
+        elif n == "bull_call_spread":
+            legs = (
+                f"  Buy Call `${s.leg1_strike}` / Sell Call `${s.leg2_strike}`\n"
+                f"  Net Debit: `${s.net_debit}`"
+            )
+        elif n == "bear_put_spread":
+            legs = (
+                f"  Buy Put `${s.leg1_strike}` / Sell Put `${s.leg2_strike}`\n"
+                f"  Net Debit: `${s.net_debit}`"
+            )
+        elif n == "long_straddle":
+            legs = (
+                f"  Buy Call + Put @ `${s.leg1_strike}` (ATM)\n"
+                f"  Net Debit: `${s.net_debit}` | Move needed: `{s.move_needed_pct:.1f}%`"
+            )
+        elif n == "long_call_leap":
+            legs = (
+                f"  Buy Call `${s.leg1_strike}` (deep ITM, ~0.75Δ)\n"
+                f"  Net Debit: `${s.net_debit}` | Stock replacement"
+            )
+        elif n == "short_strangle":
+            legs = (
+                f"  Sell Put `${s.leg1_strike}` / Sell Call `${s.leg2_strike}`\n"
+                f"  Net Credit: `${s.net_credit}` | ⚠️ Undefined risk"
+            )
+        else:
+            legs = "  See details above"
+
+        max_loss_str   = f"${s.max_loss:.0f}"   if s.max_loss   < 9_999_990 else "Unlimited"
+        max_profit_str = f"${s.max_profit:.0f}" if s.max_profit < 9_999_990 else "Unlimited"
+        theta_str      = f"${s.theta_daily:+.2f}/day" if s.theta_daily else "—"
+        vega_str       = f"${s.vega_per_1pct:+.2f}/1%" if s.vega_per_1pct else "—"
+        cat_emoji      = "🟢" if s.category == "BULLISH" else ("🔴" if s.category == "BEARISH" else "⚪")
+
+        return (
+            f"{cat_emoji} *{s.ticker}* — {s.strategy_display}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💰 Price: `${s.underlying_price:.2f}` | IV Rank: `{s.iv_rank:.0f}%`\n"
+            f"\n*Trade Structure:*\n{legs}\n"
+            f"\n*Metrics:*\n"
+            f"  Max Profit : `{max_profit_str}`\n"
+            f"  Max Loss   : `{max_loss_str}`\n"
+            f"  R/R        : `{s.risk_reward_ratio:.2f}`\n"
+            f"  PoP        : ~`{s.probability_of_profit:.0f}%`\n"
+            f"\n*Greeks (est.):*\n"
+            f"  Theta: `{theta_str}` | Vega: `{vega_str}`\n"
+            f"\nBreak-evens: `${s.break_even_low:.2f}` — `${s.break_even_high:.2f}`\n"
+            f"Expiry: `{s.expiry_date}` (~`{s.dte}` DTE)\n"
+            f"\n*Management:*\n"
+            f"  Close at 50% profit → `${s.close_target_dollar:.0f}`\n"
+            f"  Review / roll at `{s.manage_at_dte}` DTE\n"
+            + (f"\n📰 *News:* _{s.news_pulse}_\n" if s.news_pulse else "")
+            + f"\n_{s.rationale}_"
+        )
