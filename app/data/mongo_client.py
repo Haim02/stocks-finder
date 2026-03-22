@@ -149,6 +149,11 @@ class MongoDB:
             logger.exception("Failed to save scanner candidates (source=%s)", source)
 
     @classmethod
+    def save_scanner_candidate(cls, ticker: str, source: str) -> None:
+        """Upsert a single scanner candidate (convenience wrapper)."""
+        cls.save_scanner_candidates([ticker], source)
+
+    @classmethod
     def get_recent_scanner_candidates(cls, hours: int = 48) -> list[str]:
         """
         Returns deduplicated tickers that appeared in any screener run within

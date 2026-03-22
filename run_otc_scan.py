@@ -30,6 +30,15 @@ def run_otc_pipeline():
         target_tickers.update(FALLBACK_TICKERS)
 
     final_tickers = list(target_tickers)
+
+    # XGBoost pre-filter: rank candidates by confidence (highest first)
+    from app.services.xgb_filter import enrich_with_confidence, get_xgb_label, log_scan_candidates as _log_candidates
+    _ranked = enrich_with_confidence(final_tickers)
+    _conf_map = {t: c for c, t in _ranked}
+    final_tickers = [t for _, t in _ranked]          # reordered by XGB confidence
+    _log_candidates(final_tickers, source="otc")
+    print(f"🤖 XGBoost ranked {len(final_tickers)} OTC candidates.")
+
     otc_opportunities = []
 
     print(f"🔎 Analyzing {len(final_tickers)} OTC stocks for Hard Rules (Price & RVOL)...")
@@ -57,6 +66,7 @@ def run_otc_pipeline():
 
             ai_result = ai_service.analyze_stock(ticker, prompt_headline, fake_fin_data)
 
+            xgb_conf = _conf_map.get(ticker, 0.0)
             otc_opportunities.append({
                 "ticker": ticker,
                 "headline": f"🔥 OTC Alert: {otc_data['rvol']}x Volume Surge!",
@@ -64,7 +74,9 @@ def run_otc_pipeline():
                 "price": otc_data['price'],
                 "financials": fake_fin_data,
                 "ai_hebrew_desc": ai_result['hebrew_desc'],
-                "ai_analysis": ai_result['analysis']
+                "ai_analysis": ai_result['analysis'],
+                "xgb_confidence": xgb_conf,
+                "xgb_label": get_xgb_label(xgb_conf),
             })
 
             # שמירה ב-DB לאימון מודל ה-Machine Learning העתידי (מייסטון 2)

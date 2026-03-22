@@ -747,6 +747,8 @@ def _sync_analyze_ticker(ticker: str) -> str:
         get_iv_rank, get_current_iv, get_vix_level,
         check_earnings_soon, get_nearest_expiry,
     )
+    from app.services.ml_service import predict_confidence
+    from app.services.xgb_filter import get_xgb_label
 
     engine   = OptionsStrategyEngine()
     stock    = yf.Ticker(ticker)
@@ -759,6 +761,11 @@ def _sync_analyze_ticker(ticker: str) -> str:
     vix      = get_vix_level()
     earnings = check_earnings_soon(ticker, days=7)
     expiry   = get_nearest_expiry(ticker, 35)
+
+    # XGBoost confidence
+    xgb_conf  = predict_confidence(ticker)
+    xgb_label = get_xgb_label(xgb_conf if xgb_conf is not None else 0.0)
+    xgb_line  = f"`{xgb_conf:.1f}%` {xgb_label}" if xgb_conf is not None else "N/A"
 
     # Quick technicals from 3-month history
     try:
@@ -795,6 +802,7 @@ def _sync_analyze_ticker(ticker: str) -> str:
         f"📊 *{ticker}* — Quick Analysis\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"💹 Price: `${price:.2f}`\n"
+        f"🤖 XGBoost: {xgb_line}\n"
         f"📈 IV Rank: `{iv_rank:.0f}%` {iv_bar}\n"
         f"📊 Current IV: `{curr_iv * 100:.1f}%`\n"
         f"📐 RSI(14): `{rsi:.1f}` — {rsi_tag}\n"
@@ -842,7 +850,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "🔬 *Research:*\n"
         "/deepdive TICKER — Goldman Sachs note + email report\n\n"
         "🤖 *Model:*\n"
-        "/train — Retrain XGBoost ML model\n\n"
+        "/train — Retrain XGBoost ML model\n"
+        "/leaderboard — Top tickers by XGBoost confidence (last 48h)\n\n"
         "ℹ️ *System:*\n"
         "/status — Market snapshot (VIX + macro)\n"
         "/options — 0DTE SPX Iron Condor setup\n"
@@ -850,6 +859,53 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "📅 *Auto-schedule:* Daily scan Mon–Fri 16:45 Israel time",
         parse_mode=ParseMode.MARKDOWN,
     )
+
+
+async def cmd_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /leaderboard
+    Ranks all tickers seen in the last 48 h by XGBoost confidence.
+    Shows top 15 candidates with score + label.
+    """
+    if not _is_authorized(update):
+        return
+
+    await update.message.reply_text("🤖 Building XGBoost leaderboard from last 48h scans...")
+
+    try:
+        result = await asyncio.to_thread(_run_leaderboard_sync)
+        try:
+            await update.message.reply_text(result, parse_mode=ParseMode.MARKDOWN)
+        except Exception:
+            await update.message.reply_text(result)
+    except Exception as exc:
+        logger.exception("cmd_leaderboard failed")
+        await update.message.reply_text(f"❌ Leaderboard failed: {exc}")
+
+
+def _run_leaderboard_sync() -> str:
+    from app.data.mongo_client import MongoDB
+    from app.services.xgb_filter import enrich_with_confidence, get_xgb_label
+
+    candidates = MongoDB.get_recent_scanner_candidates(hours=48)
+    if not candidates:
+        return "⚠️ No scanner candidates found in the last 48h.\nRun /dailyscan or /optionsscan first."
+
+    ranked = enrich_with_confidence(candidates)
+    top    = ranked[:15]
+
+    lines = [
+        f"🏆 *XGBoost Leaderboard* (last 48h)\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Ranked by: ≥5% gain in 10 days probability\n"
+        f"Pool size: {len(candidates)} tickers\n"
+    ]
+    for i, (conf, ticker) in enumerate(top, start=1):
+        label = get_xgb_label(conf)
+        score = f"`{conf:.1f}%`" if conf > 0 else "`N/A`"
+        lines.append(f"{i:>2}. `{ticker:<6}` {score} {label}")
+
+    return "\n".join(lines)
 
 
 def _get_event_loop():
@@ -931,6 +987,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("intelligence", cmd_market_intelligence))
     app.add_handler(CommandHandler("otc",          cmd_otc_scan))
     app.add_handler(CommandHandler("train",        cmd_train_model))
+    app.add_handler(CommandHandler("leaderboard",  cmd_leaderboard))
     _app = app
     return app
 
