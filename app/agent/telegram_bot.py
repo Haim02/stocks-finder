@@ -559,17 +559,17 @@ async def cmd_daily_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not _is_authorized(update):
         return
     await update.message.reply_text(
-        "📊 *Daily Scan started...*\n"
-        "Running TA analysis on all candidates.\n"
-        "You will receive an email when done.",
+        "📊 *סריקה יומית החלה...*\n"
+        "מריץ ניתוח טכני על כל המועמדים.\n"
+        "תקבל מייל כשהיא תסתיים.",
         parse_mode=ParseMode.MARKDOWN,
     )
     try:
         await asyncio.to_thread(_sync_daily_scan)
-        await update.message.reply_text("✅ *Daily Scan complete!* Check your email.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("✅ *הסריקה היומית הושלמה!* בדוק את המייל שלך.", parse_mode=ParseMode.MARKDOWN)
     except Exception as exc:
         logger.exception("cmd_daily_scan failed")
-        await update.message.reply_text(f"❌ Daily scan failed: {exc}")
+        await update.message.reply_text(f"❌ הסריקה היומית נכשלה: {exc}")
 
 def _sync_daily_scan():
     from run_daily_scan import run_scan
@@ -581,18 +581,18 @@ async def cmd_options_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not _is_authorized(update):
         return
     await update.message.reply_text(
-        "🎯 *Options Scan started...*\n"
-        "Scanning Finviz, filtering with XGBoost,\n"
-        "building SPX 0DTE + stock credit spreads.\n"
-        "Email coming shortly.",
+        "🎯 *סריקת אופציות החלה...*\n"
+        "סורק את Finviz, מסנן עם XGBoost,\n"
+        "בונה Iron Condor SPX + ספרדים על מניות.\n"
+        "מייל בדרך.",
         parse_mode=ParseMode.MARKDOWN,
     )
     try:
         await asyncio.to_thread(_sync_options_scan)
-        await update.message.reply_text("✅ *Options Brief sent!* Check your email.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("✅ *דוח האופציות נשלח!* בדוק את המייל שלך.", parse_mode=ParseMode.MARKDOWN)
     except Exception as exc:
         logger.exception("cmd_options_scan failed")
-        await update.message.reply_text(f"❌ Options scan failed: {exc}")
+        await update.message.reply_text(f"❌ סריקת אופציות נכשלה: {exc}")
 
 def _sync_options_scan():
     from run_options_scan import run_options_scan
@@ -604,17 +604,17 @@ async def cmd_smart_money(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not _is_authorized(update):
         return
     await update.message.reply_text(
-        "🦅 *Smart Money Scan started...*\n"
-        "Detecting Wyckoff accumulation patterns\n"
-        "and institutional activity.",
+        "🦅 *סריקת כסף חכם החלה...*\n"
+        "מזהה דפוסי צבירה Wyckoff\n"
+        "ופעילות מוסדית.",
         parse_mode=ParseMode.MARKDOWN,
     )
     try:
         await asyncio.to_thread(_sync_smart_money)
-        await update.message.reply_text("✅ *Smart Money scan complete!* Check your email.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("✅ *סריקת כסף חכם הושלמה!* בדוק את המייל שלך.", parse_mode=ParseMode.MARKDOWN)
     except Exception as exc:
         logger.exception("cmd_smart_money failed")
-        await update.message.reply_text(f"❌ Smart Money scan failed: {exc}")
+        await update.message.reply_text(f"❌ סריקת כסף חכם נכשלה: {exc}")
 
 def _sync_smart_money():
     from run_smart_money import run_smart_money_tracker
@@ -626,16 +626,16 @@ async def cmd_news_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not _is_authorized(update):
         return
     await update.message.reply_text(
-        "📰 *News Scan started...*\n"
-        "Scanning latest market-moving headlines.",
+        "📰 *סריקת חדשות החלה...*\n"
+        "סורק כותרות אחרונות שמניעות את השוק.",
         parse_mode=ParseMode.MARKDOWN,
     )
     try:
         await asyncio.to_thread(_sync_news_scan)
-        await update.message.reply_text("✅ *News scan complete!*", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("✅ *סריקת חדשות הושלמה!*", parse_mode=ParseMode.MARKDOWN)
     except Exception as exc:
         logger.exception("cmd_news_scan failed")
-        await update.message.reply_text(f"❌ News scan failed: {exc}")
+        await update.message.reply_text(f"❌ סריקת חדשות נכשלה: {exc}")
 
 def _sync_news_scan():
     from run_news_scan import run_hybrid_scan
@@ -647,17 +647,17 @@ async def cmd_market_intelligence(update: Update, context: ContextTypes.DEFAULT_
     if not _is_authorized(update):
         return
     await update.message.reply_text(
-        "🧠 *Market Intelligence started...*\n"
-        "Analyzing macro context, sector rotation,\n"
-        "and institutional positioning.",
+        "🧠 *ניתוח מודיעין שוק החל...*\n"
+        "מנתח הקשר מאקרו, רוטציית סקטורים\n"
+        "ומיצוב מוסדי.",
         parse_mode=ParseMode.MARKDOWN,
     )
     try:
         await asyncio.to_thread(_sync_market_intelligence)
-        await update.message.reply_text("✅ *Market Intelligence complete!* Check your email.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("✅ *ניתוח מודיעין השוק הושלם!* בדוק את המייל שלך.", parse_mode=ParseMode.MARKDOWN)
     except Exception as exc:
         logger.exception("cmd_market_intelligence failed")
-        await update.message.reply_text(f"❌ Market Intelligence failed: {exc}")
+        await update.message.reply_text(f"❌ ניתוח מודיעין שוק נכשל: {exc}")
 
 def _sync_market_intelligence():
     from run_market_intelligence import run_market_intelligence
@@ -669,16 +669,16 @@ async def cmd_otc_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not _is_authorized(update):
         return
     await update.message.reply_text(
-        "🔬 *OTC Scan started...*\n"
-        "Scanning OTC markets for unusual activity.",
+        "🔬 *סריקת OTC החלה...*\n"
+        "סורק שוק ה-OTC לפעילות חריגה.",
         parse_mode=ParseMode.MARKDOWN,
     )
     try:
         await asyncio.to_thread(_sync_otc_scan)
-        await update.message.reply_text("✅ *OTC scan complete!* Check your email.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("✅ *סריקת OTC הושלמה!* בדוק את המייל שלך.", parse_mode=ParseMode.MARKDOWN)
     except Exception as exc:
         logger.exception("cmd_otc_scan failed")
-        await update.message.reply_text(f"❌ OTC scan failed: {exc}")
+        await update.message.reply_text(f"❌ סריקת OTC נכשלה: {exc}")
 
 def _sync_otc_scan():
     from run_otc_scan import run_otc_pipeline
@@ -690,17 +690,17 @@ async def cmd_train_model(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not _is_authorized(update):
         return
     await update.message.reply_text(
-        "🤖 *Model Training started...*\n"
-        "This may take several minutes.\n"
-        "Training XGBoost on latest market data.",
+        "🤖 *אימון המודל החל...*\n"
+        "התהליך עשוי לקחת מספר דקות.\n"
+        "מאמן XGBoost על נתוני שוק עדכניים.",
         parse_mode=ParseMode.MARKDOWN,
     )
     try:
         await asyncio.to_thread(_sync_train_model)
-        await update.message.reply_text("✅ *Model training complete!* New model is live.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("✅ *אימון המודל הושלם!* המודל החדש פעיל.", parse_mode=ParseMode.MARKDOWN)
     except Exception as exc:
         logger.exception("cmd_train_model failed")
-        await update.message.reply_text(f"❌ Model training failed: {exc}")
+        await update.message.reply_text(f"❌ אימון המודל נכשל: {exc}")
 
 def _sync_train_model():
     from train_model import train_xgb_model
@@ -717,8 +717,8 @@ async def cmd_analyze_ticker(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if not context.args:
         await update.message.reply_text(
-            "📌 Usage: `/analyze TICKER`\nExample: `/analyze AAPL`\n\n"
-            "_For a full GS research note + email: /deepdive AAPL_",
+            "📌 שימוש: `/analyze טיקר`\nדוגמה: `/analyze AAPL`\n\n"
+            "_לניתוח GS מלא + מייל: /deepdive AAPL_",
             parse_mode=ParseMode.MARKDOWN,
         )
         return
@@ -728,7 +728,7 @@ async def cmd_analyze_ticker(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(f"⚠️ Invalid ticker: `{ticker}`", parse_mode=ParseMode.MARKDOWN)
         return
 
-    await update.message.reply_text(f"🔍 Analyzing *{ticker}*...", parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(f"🔍 מנתח את *{ticker}*...", parse_mode=ParseMode.MARKDOWN)
 
     try:
         result = await asyncio.to_thread(_sync_analyze_ticker, ticker)
@@ -738,7 +738,7 @@ async def cmd_analyze_ticker(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text(result)
     except Exception as exc:
         logger.exception("cmd_analyze_ticker failed for %s", ticker)
-        await update.message.reply_text(f"❌ Analysis of {ticker} failed: {exc}")
+        await update.message.reply_text(f"❌ ניתוח {ticker} נכשל: {exc}")
 
 def _sync_analyze_ticker(ticker: str) -> str:
     import yfinance as yf
@@ -754,7 +754,7 @@ def _sync_analyze_ticker(ticker: str) -> str:
     stock    = yf.Ticker(ticker)
     price    = stock.fast_info.last_price
     if not price:
-        return f"❌ Could not fetch price for *{ticker}*"
+        return f"❌ לא ניתן לשלוף מחיר עבור *{ticker}*"
 
     iv_rank  = get_iv_rank(ticker)
     curr_iv  = get_current_iv(ticker)
@@ -797,18 +797,18 @@ def _sync_analyze_ticker(ticker: str) -> str:
             break
 
     iv_bar   = "🔥" * min(5, int(iv_rank / 20))
-    rsi_tag  = "🟢 Oversold" if rsi < 35 else ("🔴 Overbought" if rsi > 65 else "🟡 Neutral")
+    rsi_tag  = "🟢 מכירת יתר" if rsi < 35 else ("🔴 קניית יתר" if rsi > 65 else "🟡 ניטרלי")
     header   = (
-        f"📊 *{ticker}* — Quick Analysis\n"
+        f"📊 *{ticker}* — ניתוח מהיר\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💹 Price: `${price:.2f}`\n"
+        f"💹 מחיר: `${price:.2f}`\n"
         f"🤖 XGBoost: {xgb_line}\n"
         f"📈 IV Rank: `{iv_rank:.0f}%` {iv_bar}\n"
-        f"📊 Current IV: `{curr_iv * 100:.1f}%`\n"
+        f"📊 IV נוכחי: `{curr_iv * 100:.1f}%`\n"
         f"📐 RSI(14): `{rsi:.1f}` — {rsi_tag}\n"
-        f"📉 Trend vs SMA50: `{trend.upper()}`\n"
-        f"📅 Nearest expiry: `{expiry}`\n"
-        f"⚠️ Earnings soon: `{'YES' if earnings else 'No'}`\n"
+        f"📉 מגמה מול SMA50: `{trend.upper()}`\n"
+        f"📅 פקיעה קרובה: `{expiry}`\n"
+        f"⚠️ דוחות בקרוב: `{'כן' if earnings else 'לא'}`\n"
         f"🌡️ VIX: `{vix:.1f}`\n\n"
     )
 
@@ -816,14 +816,14 @@ def _sync_analyze_ticker(ticker: str) -> str:
         return header + engine.format_telegram_message(best)
 
     iv_env = (
-        "HIGH — consider selling premium" if iv_rank > 50
-        else ("LOW — consider buying options" if iv_rank < 25 else "MEDIUM")
+        "גבוה — שקול מכירת פרמיה" if iv_rank > 50
+        else ("נמוך — שקול קניית אופציות" if iv_rank < 25 else "בינוני")
     )
     return (
         header
-        + f"💡 IV Environment: *{iv_env}*\n"
-        + "⚠️ No clear strategy signal at current conditions.\n"
-        + "Check back when IVR moves above 30 or below 25."
+        + f"💡 סביבת IV: *{iv_env}*\n"
+        + "⚠️ אין איתות אסטרטגיה ברור בתנאים הנוכחיים.\n"
+        + "בדוק שוב כשה-IVR יעלה מעל 30 או יירד מתחת ל-25."
     )
 
 
@@ -832,31 +832,31 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_authorized(update):
         return
     await update.message.reply_text(
-        "🤖 *stocks-finder Bot — All Commands*\n"
+        "🤖 *בוט stocks-finder — כל הפקודות*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "📊 *Scans (trigger email reports):*\n"
-        "/dailyscan — Full daily TA stock scan\n"
-        "/optionsscan — Daily options brief (SPX + stocks)\n"
-        "/smartmoney — Wyckoff institutional accumulation\n"
-        "/news — Latest market-moving news scan\n"
-        "/intelligence — Macro + sector rotation analysis\n"
-        "/otc — OTC penny stock scanner\n\n"
-        "🎯 *Options Strategy:*\n"
-        "/strategies — Scan top Finviz tickers for best strategy\n"
-        "/strategies AAPL TSLA — Specific tickers\n"
-        "/analyze TICKER — Quick IV rank + best strategy\n"
-        "/trade\\_check TICKER — Deep IV + TA + Wheel/Spread rec.\n"
-        "/quick\\_scan — Compact Ticker|Strategy|PoP|Income list\n\n"
-        "🔬 *Research:*\n"
-        "/deepdive TICKER — Goldman Sachs note + email report\n\n"
-        "🤖 *Model:*\n"
-        "/train — Retrain XGBoost ML model\n"
-        "/leaderboard — Top tickers by XGBoost confidence (last 48h)\n\n"
-        "ℹ️ *System:*\n"
-        "/status — Market snapshot (VIX + macro)\n"
-        "/options — 0DTE SPX Iron Condor setup\n"
-        "/help — This message\n\n"
-        "📅 *Auto-schedule:* Daily scan Mon–Fri 16:45 Israel time",
+        "📊 *סריקות (שולחות דוח במייל):*\n"
+        "/dailyscan — סריקה יומית מלאה עם ניתוח טכני\n"
+        "/optionsscan — דוח אופציות יומי (SPX + מניות)\n"
+        "/smartmoney — זיהוי צבירה מוסדית (Wyckoff)\n"
+        "/news — סריקת חדשות שוק אחרונות\n"
+        "/intelligence — ניתוח מאקרו + רוטציית סקטורים\n"
+        "/otc — סורק מניות OTC\n\n"
+        "🎯 *אסטרטגיות אופציות:*\n"
+        "/strategies — סריקת מניות Finviz לאסטרטגיה האופטימלית\n"
+        "/strategies AAPL TSLA — ניתוח מניות ספציפיות\n"
+        "/analyze טיקר — ניתוח מעמיק: IV + אסטרטגיה + ML\n"
+        "/trade\\_check טיקר — המלצת Wheel/Spread מפורטת\n"
+        "/quick\\_scan — רשימה קומפקטית: מניה | אסטרטגיה | סיכוי | הכנסה\n\n"
+        "🔬 *מחקר:*\n"
+        "/deepdive טיקר — ניתוח עמוק + דוח במייל\n\n"
+        "🤖 *מודל ML:*\n"
+        "/train — אימון מחדש של מודל XGBoost\n"
+        "/leaderboard — Top 15 מניות לפי ציון ML (48 שעות אחרונות)\n\n"
+        "ℹ️ *מערכת:*\n"
+        "/status — סנפשוט שוק (VIX + מאקרו)\n"
+        "/options — הגדרת Iron Condor 0DTE על SPX\n"
+        "/help — ההודעה הזו\n\n"
+        "📅 *תזמון אוטומטי:* סריקה יומית ב-16:45 שעון ישראל, ראשון–חמישי",
         parse_mode=ParseMode.MARKDOWN,
     )
 
@@ -870,7 +870,7 @@ async def cmd_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not _is_authorized(update):
         return
 
-    await update.message.reply_text("🤖 Building XGBoost leaderboard from last 48h scans...")
+    await update.message.reply_text("🏆 טוען טבלת דירוג ML...")
 
     try:
         result = await asyncio.to_thread(_run_leaderboard_sync)
@@ -880,7 +880,7 @@ async def cmd_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await update.message.reply_text(result)
     except Exception as exc:
         logger.exception("cmd_leaderboard failed")
-        await update.message.reply_text(f"❌ Leaderboard failed: {exc}")
+        await update.message.reply_text(f"❌ שגיאה בטבלת דירוג: {exc}")
 
 
 def _run_leaderboard_sync() -> str:
@@ -889,16 +889,16 @@ def _run_leaderboard_sync() -> str:
 
     candidates = MongoDB.get_recent_scanner_candidates(hours=48)
     if not candidates:
-        return "⚠️ No scanner candidates found in the last 48h.\nRun /dailyscan or /optionsscan first."
+        return "⚠️ לא נמצאו מועמדים מסריקות אחרונות.\nהרץ /dailyscan או /optionsscan תחילה."
 
     ranked = enrich_with_confidence(candidates)
     top    = ranked[:15]
 
     lines = [
-        f"🏆 *XGBoost Leaderboard* (last 48h)\n"
+        f"🏆 *טבלת דירוג ML — XGBoost*\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"Ranked by: ≥5% gain in 10 days probability\n"
-        f"Pool size: {len(candidates)} tickers\n"
+        f"מדורג לפי: הסתברות לעלייה ≥5% ב-10 ימים\n"
+        f"גודל מאגר: {len(candidates)} מניות\n"
     ]
     for i, (conf, ticker) in enumerate(top, start=1):
         label = get_xgb_label(conf)

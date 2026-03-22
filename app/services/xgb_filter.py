@@ -53,15 +53,15 @@ def filter_by_confidence(
 def get_xgb_label(confidence: float) -> str:
     """Return an emoji + label string for a confidence score (0–100)."""
     if confidence >= 70:
-        return "🟢 Strong"
+        return "🟢 חזק"
     elif confidence >= 50:
-        return "🟡 Moderate"
+        return "🟡 בינוני"
     elif confidence >= 30:
-        return "🟠 Weak"
+        return "🟠 חלש"
     elif confidence > 0:
-        return "🔴 Low"
+        return "🔴 נמוך"
     else:
-        return "⚫ N/A"
+        return "⚫ אין נתונים"
 
 
 def build_xgb_summary_block(ranked: list[tuple[float, str]]) -> str:
@@ -79,7 +79,7 @@ def build_xgb_summary_block(ranked: list[tuple[float, str]]) -> str:
     if not ranked:
         return ""
 
-    lines = ["🤖 *XGBoost Confidence*"]
+    lines = ["🤖 *ציוני ביטחון XGBoost:*"]
     for conf, ticker in ranked:
         label = get_xgb_label(conf)
         score = f"({conf:.1f}%)" if conf > 0 else ""

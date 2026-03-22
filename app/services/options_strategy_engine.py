@@ -135,52 +135,52 @@ class OptionsStrategyEngine:
 
         if has_earnings_soon and iv_rank > 50:
             s = self._build_long_straddle(**kw)
-            s.rationale = "Earnings play — large move expected, direction unknown"
+            s.rationale = "עסקת דוחות — צפויה תנועה חדה, כיוון לא ידוע"
             return s
 
         if iv_rank > 50 and trend == "neutral":
             s = self._build_iron_condor(**kw)
-            s.rationale = "High IVR + neutral market — collect premium from both sides (10-15% profit zone)"
+            s.rationale = "IVR גבוה + שוק ניטרלי — גביית פרמיה משני הצדדים (אזור רווח 10-15%)"
             return s
 
         if iv_rank > 30 and trend in ("neutral", "bearish", "strong_bearish") and rsi > 65:
             s = self._build_bear_call_spread(**kw)
-            s.rationale = "High IVR + RSI overbought (>65) — sell call spread above resistance at ~0.20 delta"
+            s.rationale = "IVR גבוה + RSI קניית יתר (>65) — מכירת Call Spread מעל התנגדות, ~0.20 דלתא"
             return s
 
         if iv_rank > 30 and trend in ("bullish", "neutral") and rsi < 60:
             s = self._build_bull_put_spread(**kw)
-            s.rationale = "IVR > 30 + bullish bias + RSI < 60 — credit below support at ~0.20 delta, 68% PoP"
+            s.rationale = "IVR > 30 + נטייה שורית + RSI < 60 — קרדיט מתחת לתמיכה, ~0.20 דלתא, PoP 68%"
             return s
 
         if iv_rank > 50 and trend in ("bullish", "strong_bullish") and rsi < 35:
             s = self._build_cash_secured_put(**kw)
-            s.rationale = "High IVR + oversold (RSI < 35) + bullish — get paid to buy the dip, 30-45 DTE"
+            s.rationale = "IVR גבוה + מכירת יתר (RSI < 35) + שורי — להיכנס לירידה תוך גביית פרמיה, 30-45 DTE"
             return s
 
         if owns_shares and iv_rank > 30 and rsi > 60:
             s = self._build_covered_call(**kw)
-            s.rationale = "Own shares + elevated IVR + near resistance — generate monthly income"
+            s.rationale = "מחזיק מניות + IVR מוגבר + ליד התנגדות — יצירת הכנסה חודשית שוטפת"
             return s
 
         if vix_level > 25 and iv_rank > 60 and ticker in INDEX_ETFS:
             s = self._build_short_strangle(**kw)
-            s.rationale = "VIX spike + index ETF — sell elevated vol premium (undefined risk, use stops)"
+            s.rationale = "זינוק VIX + ETF מדד — מכירת פרמיית תנודתיות גבוהה (סיכון בלתי מוגבל, השתמש בסטופים)"
             return s
 
         if iv_rank < 25 and trend in ("bullish", "strong_bullish"):
             s = self._build_bull_call_spread(**kw)
-            s.rationale = "Low IVR + bullish — cheap debit spread, defined risk, directional play"
+            s.rationale = "IVR נמוך + שורי — ספרד דביט זול, סיכון מוגדר, משחק כיווני"
             return s
 
         if iv_rank < 25 and trend == "strong_bullish" and dte_preference > 60:
             s = self._build_long_call_leap(**kw)
-            s.rationale = "Low IVR + strong uptrend — cheap long-dated calls as stock replacement"
+            s.rationale = "IVR נמוך + מגמה שורית חזקה — קולים זולים לטווח ארוך כתחליף מניה"
             return s
 
         if iv_rank < 25 and trend in ("bearish", "strong_bearish"):
             s = self._build_bear_put_spread(**kw)
-            s.rationale = "Low IVR + bearish — debit put spread, defined risk, directional play"
+            s.rationale = "IVR נמוך + דובי — Put ספרד בדביט, סיכון מוגדר, משחק כיווני"
             return s
 
         return None
@@ -463,62 +463,62 @@ class OptionsStrategyEngine:
 
         if n == "iron_condor":
             legs = (
-                f"  Sell Put `${s.leg1_strike}` / Buy Put `${s.leg2_strike}`\n"
-                f"  Sell Call `${s.leg3_strike}` / Buy Call `${s.leg4_strike}`\n"
-                f"  Net Credit: `${s.net_credit}`"
+                f"  מכור Put `${s.leg1_strike}` / קנה Put `${s.leg2_strike}`\n"
+                f"  מכור Call `${s.leg3_strike}` / קנה Call `${s.leg4_strike}`\n"
+                f"  קרדיט נטו: `${s.net_credit}`"
             )
         elif n == "bull_put_spread":
             legs = (
-                f"  Sell Put `${s.leg1_strike}` / Buy Put `${s.leg2_strike}`\n"
-                f"  Net Credit: `${s.net_credit}` | Target delta: ~{s.target_delta}"
+                f"  מכור Put `${s.leg1_strike}` / קנה Put `${s.leg2_strike}`\n"
+                f"  קרדיט נטו: `${s.net_credit}` | Target delta: ~{s.target_delta}"
             )
         elif n == "bear_call_spread":
             legs = (
-                f"  Sell Call `${s.leg1_strike}` / Buy Call `${s.leg2_strike}`\n"
-                f"  Net Credit: `${s.net_credit}` | Target delta: ~{s.target_delta}"
+                f"  מכור Call `${s.leg1_strike}` / קנה Call `${s.leg2_strike}`\n"
+                f"  קרדיט נטו: `${s.net_credit}` | Target delta: ~{s.target_delta}"
             )
         elif n == "cash_secured_put":
             legs = (
-                f"  Sell Put `${s.leg1_strike}`\n"
-                f"  Premium: `${s.net_credit}` | Collateral: `${s.leg1_strike * 100:.0f}`\n"
-                f"  ROC: `{s.return_on_capital:.1f}%` (~`{s.annualized_return:.0f}%` ann.)"
+                f"  מכור Put `${s.leg1_strike}`\n"
+                f"  פרמיה: `${s.net_credit}` | ביטחון: `${s.leg1_strike * 100:.0f}`\n"
+                f"  תשואה על ההון: `{s.return_on_capital:.1f}%` (~`{s.annualized_return:.0f}%` שנתי)"
             )
         elif n == "covered_call":
             legs = (
-                f"  Sell Call `${s.leg1_strike}` (own 100 shares)\n"
-                f"  Premium: `${s.net_credit}`\n"
-                f"  ROC: `{s.return_on_capital:.1f}%` (~`{s.annualized_return:.0f}%` ann.)"
+                f"  מכור Call `${s.leg1_strike}` (בעלות על 100 מניות)\n"
+                f"  פרמיה: `${s.net_credit}`\n"
+                f"  תשואה על ההון: `{s.return_on_capital:.1f}%` (~`{s.annualized_return:.0f}%` שנתי)"
             )
         elif n == "bull_call_spread":
             legs = (
-                f"  Buy Call `${s.leg1_strike}` / Sell Call `${s.leg2_strike}`\n"
-                f"  Net Debit: `${s.net_debit}`"
+                f"  קנה Call `${s.leg1_strike}` / מכור Call `${s.leg2_strike}`\n"
+                f"  דביט נטו: `${s.net_debit}`"
             )
         elif n == "bear_put_spread":
             legs = (
-                f"  Buy Put `${s.leg1_strike}` / Sell Put `${s.leg2_strike}`\n"
-                f"  Net Debit: `${s.net_debit}`"
+                f"  קנה Put `${s.leg1_strike}` / מכור Put `${s.leg2_strike}`\n"
+                f"  דביט נטו: `${s.net_debit}`"
             )
         elif n == "long_straddle":
             legs = (
-                f"  Buy Call + Put @ `${s.leg1_strike}` (ATM)\n"
-                f"  Net Debit: `${s.net_debit}` | Move needed: `{s.move_needed_pct:.1f}%`"
+                f"  קנה Call + Put @ `${s.leg1_strike}` (ATM)\n"
+                f"  דביט נטו: `${s.net_debit}` | תנועה נדרשת: `{s.move_needed_pct:.1f}%`"
             )
         elif n == "long_call_leap":
             legs = (
-                f"  Buy Call `${s.leg1_strike}` (deep ITM, ~0.75Δ)\n"
-                f"  Net Debit: `${s.net_debit}` | Stock replacement"
+                f"  קנה Call `${s.leg1_strike}` (עמוק ITM, ~0.75Δ)\n"
+                f"  דביט נטו: `${s.net_debit}` | תחליף מניה"
             )
         elif n == "short_strangle":
             legs = (
-                f"  Sell Put `${s.leg1_strike}` / Sell Call `${s.leg2_strike}`\n"
-                f"  Net Credit: `${s.net_credit}` | ⚠️ Undefined risk"
+                f"  מכור Put `${s.leg1_strike}` / מכור Call `${s.leg2_strike}`\n"
+                f"  קרדיט נטו: `${s.net_credit}` | ⚠️ סיכון בלתי מוגבל"
             )
         else:
-            legs = "  See details above"
+            legs = "  ראה פרטים למעלה"
 
-        max_loss_str   = f"${s.max_loss:.0f}"   if s.max_loss   < 9_999_990 else "Unlimited"
-        max_profit_str = f"${s.max_profit:.0f}" if s.max_profit < 9_999_990 else "Unlimited"
+        max_loss_str   = f"${s.max_loss:.0f}"   if s.max_loss   < 9_999_990 else "בלתי מוגבל"
+        max_profit_str = f"${s.max_profit:.0f}" if s.max_profit < 9_999_990 else "בלתי מוגבל"
         theta_str      = f"${s.theta_daily:+.2f}/day" if s.theta_daily else "—"
         vega_str       = f"${s.vega_per_1pct:+.2f}/1%" if s.vega_per_1pct else "—"
         cat_emoji      = "🟢" if s.category == "BULLISH" else ("🔴" if s.category == "BEARISH" else "⚪")
@@ -526,20 +526,20 @@ class OptionsStrategyEngine:
         return (
             f"{cat_emoji} *{s.ticker}* — {s.strategy_display}\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"💰 Price: `${s.underlying_price:.2f}` | IV Rank: `{s.iv_rank:.0f}%`\n"
-            f"\n*Trade Structure:*\n{legs}\n"
-            f"\n*Metrics:*\n"
-            f"  Max Profit : `{max_profit_str}`\n"
-            f"  Max Loss   : `{max_loss_str}`\n"
-            f"  R/R        : `{s.risk_reward_ratio:.2f}`\n"
-            f"  PoP        : ~`{s.probability_of_profit:.0f}%`\n"
+            f"💰 מחיר: `${s.underlying_price:.2f}` | IV Rank: `{s.iv_rank:.0f}%`\n"
+            f"\n*מבנה העסקה:*\n{legs}\n"
+            f"\n*מטריקות:*\n"
+            f"  רווח מקסימלי : `{max_profit_str}`\n"
+            f"  הפסד מקסימלי : `{max_loss_str}`\n"
+            f"  R/R           : `{s.risk_reward_ratio:.2f}`\n"
+            f"  PoP           : ~`{s.probability_of_profit:.0f}%`\n"
             f"\n*Greeks (est.):*\n"
             f"  Theta: `{theta_str}` | Vega: `{vega_str}`\n"
-            f"\nBreak-evens: `${s.break_even_low:.2f}` — `${s.break_even_high:.2f}`\n"
-            f"Expiry: `{s.expiry_date}` (~`{s.dte}` DTE)\n"
-            f"\n*Management:*\n"
-            f"  Close at 50% profit → `${s.close_target_dollar:.0f}`\n"
-            f"  Review / roll at `{s.manage_at_dte}` DTE\n"
-            + (f"\n📰 *News:* _{s.news_pulse}_\n" if s.news_pulse else "")
+            f"\nנקודות איזון: `${s.break_even_low:.2f}` — `${s.break_even_high:.2f}`\n"
+            f"פקיעה: `{s.expiry_date}` (~`{s.dte}` DTE)\n"
+            f"\n*ניהול העסקה:*\n"
+            f"  סגור ב-50% רווח → `${s.close_target_dollar:.0f}`\n"
+            f"  נהל / Roll ב-`{s.manage_at_dte}` DTE\n"
+            + (f"\n📰 *חדשות:* _{s.news_pulse}_\n" if s.news_pulse else "")
             + f"\n_{s.rationale}_"
         )
