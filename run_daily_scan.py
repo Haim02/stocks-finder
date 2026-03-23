@@ -30,7 +30,7 @@
 
 #     try:
 #         # 1. קבלת רשימת מניות מהסורק
-#         potential_stocks = ScreenerService.get_candidates()
+#         potential_stocks = ScreenerService.get_candidates_from_url(_FINVIZ_URL)
 
 #         if not potential_stocks:
 #             print("❌ No candidates found.")
@@ -133,6 +133,11 @@ from app.core.db import SessionLocal, init_db
 from app.models.models import AlertHistory
 from app.services.screener_service import ScreenerService
 from app.services.data_fetcher import DataFetcher
+
+_FINVIZ_URL = (
+    "https://finviz.com/screener.ashx?v=211"
+    "&f=sh_avgvol_o400,sh_relvol_o1.5,sh_short_o5,ta_beta_o0.5,ta_rsi_nos50&ft=4"
+)
 from app.ta.engine import TAEngine
 from app.services.email_service import EmailService
 from app.services.ai_service import AIService
@@ -143,7 +148,7 @@ def run_scan():
     db = SessionLocal()
 
     try:
-        potential_stocks = ScreenerService.get_candidates()
+        potential_stocks = ScreenerService.get_candidates_from_url(_FINVIZ_URL)
         # potential_stocks= [ "IBM" ]
         if not potential_stocks:
             print("❌ No candidates found.")

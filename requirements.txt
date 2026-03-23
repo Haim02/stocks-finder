@@ -51,3 +51,4 @@ apscheduler>=3.10
 # ── Utilities ─────────────────────────────────────────────────────────────────
 tenacity
 pytz
+feedparser
