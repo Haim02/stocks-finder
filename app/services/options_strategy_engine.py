@@ -89,6 +89,20 @@ class StrategySignal(BaseModel):
     annualized_return: float = 0.0
     move_needed_pct:   float = 0.0
 
+    # Calendar Spread specific
+    near_expiry: str = ""       # short-leg expiry (closer date)
+    far_expiry:  str = ""       # long-leg expiry (further date)
+    near_dte:    int = 0
+    far_dte:     int = 0
+
+    # Back Ratio specific
+    ratio_short: int = 1        # number of short contracts
+    ratio_long:  int = 2        # number of long contracts
+
+    # Broken-Wing Butterfly specific
+    is_broken_wing: bool  = False
+    skip_width:     float = 0.0  # extra distance on the far wing
+
     # ── Context ───────────────────────────────────────────────────────────────
     rationale:        str = ""
     market_condition: str = ""
@@ -148,6 +162,18 @@ class OptionsStrategyEngine:
             s.rationale = "IVR גבוה + RSI קניית יתר (>65) — מכירת Call Spread מעל התנגדות, ~0.20 דלתא"
             return s
 
+        # Butterfly: high precision pin at expiry (more specific than bull_put_spread)
+        if iv_rank > 40 and trend == "neutral" and 44 <= rsi <= 56 and dte_preference <= 21:
+            s = self._build_butterfly(ticker, price, iv_rank, dte_preference)
+            s.rationale = "מניה תקועה + IV גבוה + קרוב לפקיעה — דיוק מקסימלי ב-Butterfly"
+            return s
+
+        # Broken-Wing Butterfly: medium IV + bullish/neutral + medium DTE
+        if 30 <= iv_rank <= 55 and trend in ("bullish", "neutral") and 21 <= dte_preference <= 45:
+            s = self._build_broken_wing_butterfly(ticker, price, iv_rank, dte_preference)
+            s.rationale = "IV בינוני + נטייה שורית — מבנה א-סימטרי עם קרדיט נטו"
+            return s
+
         if iv_rank > 30 and trend in ("bullish", "neutral") and rsi < 60:
             s = self._build_bull_put_spread(**kw)
             s.rationale = "IVR > 30 + נטייה שורית + RSI < 60 — קרדיט מתחת לתמיכה, ~0.20 דלתא, PoP 68%"
@@ -168,6 +194,12 @@ class OptionsStrategyEngine:
             s.rationale = "זינוק VIX + ETF מדד — מכירת פרמיית תנודתיות גבוהה (סיכון בלתי מוגבל, השתמש בסטופים)"
             return s
 
+        # Call Back Ratio: strong bullish + low IV + expecting big explosive move up
+        if iv_rank < 25 and trend == "strong_bullish" and 30 <= dte_preference <= 60:
+            s = self._build_call_back_ratio(ticker, price, iv_rank, dte_preference)
+            s.rationale = "IV נמוך + זינוק שורי חזק צפוי — חשיפה בלתי מוגבלת בעלות אפס"
+            return s
+
         if iv_rank < 25 and trend in ("bullish", "strong_bullish"):
             s = self._build_bull_call_spread(**kw)
             s.rationale = "IVR נמוך + שורי — ספרד דביט זול, סיכון מוגדר, משחק כיווני"
@@ -181,6 +213,12 @@ class OptionsStrategyEngine:
         if iv_rank < 25 and trend in ("bearish", "strong_bearish"):
             s = self._build_bear_put_spread(**kw)
             s.rationale = "IVR נמוך + דובי — Put ספרד בדביט, סיכון מוגדר, משחק כיווני"
+            return s
+
+        # Calendar Spread: low IV + truly neutral + enough time
+        if iv_rank < 30 and trend == "neutral" and dte_preference >= 45:
+            s = self._build_calendar_spread(ticker, price, iv_rank, dte_preference)
+            s.rationale = "IV נמוך + מניה תקועה — מרוויחים מהבדל שחיקת הזמן בין פקיעות"
             return s
 
         return None
@@ -454,6 +492,173 @@ class OptionsStrategyEngine:
             close_target_dollar=round(credit * 0.50 * 100, 2), manage_at_dte=21,
         )
 
+    def _build_calendar_spread(self, ticker: str, price: float, iv_rank: float, dte: int) -> StrategySignal:
+        """Calendar Spread: Sell near-term ATM + Buy far-term ATM. Profits from theta differential."""
+        from app.services.iv_calculator import get_nearest_expiry
+        strike   = round(price)
+        near_exp = get_nearest_expiry(ticker, 30)
+        far_exp  = get_nearest_expiry(ticker, 60)
+        debit    = round(price * 0.02, 2)
+        mp       = round(debit * 1.5 * 100, 2)
+        ml       = round(debit * 100, 2)
+        be_l     = round(strike * 0.96, 2)
+        be_h     = round(strike * 1.04, 2)
+        return StrategySignal(
+            strategy_name="calendar_spread",
+            strategy_display="Calendar Spread 📅",
+            category="NEUTRAL",
+            ticker=ticker,
+            underlying_price=price,
+            leg1_strike=float(strike),
+            leg2_strike=float(strike),
+            net_debit=debit,
+            max_profit=mp,
+            max_loss=ml,
+            break_even_low=be_l,
+            break_even_high=be_h,
+            probability_of_profit=55.0,
+            risk_reward_ratio=round(mp / ml, 2) if ml > 0 else 0,
+            expiry_date=near_exp,
+            dte=30,
+            iv_rank=iv_rank,
+            near_expiry=near_exp,
+            far_expiry=far_exp,
+            near_dte=30,
+            far_dte=60,
+            close_at_profit_pct=0.25,
+            manage_at_dte=23,
+            close_target_dollar=round(debit * 0.25 * 100, 2),
+        )
+
+    def _build_butterfly(self, ticker: str, price: float, iv_rank: float, dte: int) -> StrategySignal:
+        """Butterfly: Buy low + Sell 2 ATM + Buy high. Max profit when stock pins at middle strike."""
+        from app.services.iv_calculator import get_nearest_expiry
+        sl    = round(price * 0.95)
+        sm    = round(price)
+        sh    = round(price * 1.05)
+        wing  = sm - sl
+        debit = round(wing * 0.25, 2)
+        mp    = round((wing - debit) * 100, 2)
+        ml    = round(debit * 100, 2)
+        be_l  = round(sl + debit, 2)
+        be_h  = round(sh - debit, 2)
+        exp   = get_nearest_expiry(ticker, min(dte, 21))
+        return StrategySignal(
+            strategy_name="butterfly",
+            strategy_display="Butterfly 🦋",
+            category="NEUTRAL",
+            ticker=ticker,
+            underlying_price=price,
+            leg1_strike=float(sl),
+            leg2_strike=float(sm),
+            leg3_strike=float(sh),
+            net_debit=debit,
+            max_profit=mp,
+            max_loss=ml,
+            break_even_low=be_l,
+            break_even_high=be_h,
+            probability_of_profit=30.0,
+            risk_reward_ratio=round(mp / ml, 2) if ml > 0 else 0,
+            expiry_date=exp,
+            dte=min(dte, 21),
+            iv_rank=iv_rank,
+            close_at_profit_pct=0.50,
+            manage_at_dte=7,
+            close_target_dollar=round(mp * 0.50, 2),
+        )
+
+    def _build_call_back_ratio(self, ticker: str, price: float, iv_rank: float, dte: int) -> StrategySignal:
+        """Call Back Ratio 1x2: Sell 1 ATM Call + Buy 2 OTM Calls. Unlimited profit above upper strike."""
+        from app.services.iv_calculator import get_nearest_expiry
+        iv         = max(iv_rank / 100, 0.20)
+        ss         = round(price)               # short strike (ATM)
+        sl         = round(price * 1.05)        # long strike (OTM)
+        width      = sl - ss
+        prem_short = price * iv * 0.3 * (dte / 365) ** 0.5
+        prem_long  = prem_short * 0.60
+        net        = (prem_long * 2) - prem_short
+
+        if net >= 0:
+            net_debit  = round(net, 2)
+            net_credit = 0.0
+        else:
+            net_debit  = 0.0
+            net_credit = round(abs(net), 2)
+
+        max_loss = round((width - net_credit + net_debit) * 100, 2)
+        be_high  = round(sl + max_loss / 100, 2)
+        exp      = get_nearest_expiry(ticker, dte)
+        return StrategySignal(
+            strategy_name="call_back_ratio",
+            strategy_display="Call Back Ratio 1×2 🚀",
+            category="BULLISH",
+            ticker=ticker,
+            underlying_price=price,
+            leg1_strike=float(ss),
+            leg2_strike=float(sl),
+            net_debit=net_debit,
+            net_credit=net_credit,
+            max_profit=9_999_999.0,
+            max_loss=max_loss,
+            break_even_low=float(ss),
+            break_even_high=be_high,
+            probability_of_profit=40.0,
+            risk_reward_ratio=0.0,
+            expiry_date=exp,
+            dte=dte,
+            iv_rank=iv_rank,
+            ratio_short=1,
+            ratio_long=2,
+            close_at_profit_pct=0.50,
+            manage_at_dte=21,
+            close_target_dollar=round(max_loss * 0.50, 2),
+        )
+
+    def _build_broken_wing_butterfly(self, ticker: str, price: float, iv_rank: float, dte: int) -> StrategySignal:
+        """Broken-Wing Butterfly (Put): asymmetric structure, bullish skew, net credit or zero cost."""
+        from app.services.iv_calculator import get_nearest_expiry
+        sl   = round(price * 0.90)   # low put
+        sm   = round(price * 0.95)   # mid put (short x2)
+        sh   = round(price * 1.02)   # high put (broken wing — wider)
+
+        lower_wing = sm - sl
+        upper_wing = sh - sm
+        skip       = upper_wing - lower_wing
+        raw_credit = (upper_wing - lower_wing) * 0.15
+        net_credit = round(max(raw_credit, 0.0), 2)
+
+        mp   = round((lower_wing + net_credit) * 100, 2)
+        ml   = round(max((lower_wing - net_credit) * 100, 0.0), 2)
+        be_l = round(sm - mp / 100, 2)
+        be_h = float(sh)
+        exp  = get_nearest_expiry(ticker, dte)
+        return StrategySignal(
+            strategy_name="broken_wing_butterfly",
+            strategy_display="Broken-Wing Butterfly 🦋⚡",
+            category="BULLISH",
+            ticker=ticker,
+            underlying_price=price,
+            leg1_strike=float(sl),
+            leg2_strike=float(sm),
+            leg3_strike=float(sh),
+            net_credit=net_credit,
+            net_debit=0.0,
+            max_profit=mp,
+            max_loss=ml,
+            break_even_low=be_l,
+            break_even_high=be_h,
+            probability_of_profit=60.0,
+            risk_reward_ratio=round(mp / ml, 2) if ml > 0 else 0,
+            expiry_date=exp,
+            dte=dte,
+            iv_rank=iv_rank,
+            is_broken_wing=True,
+            skip_width=float(skip),
+            close_at_profit_pct=0.50,
+            manage_at_dte=21,
+            close_target_dollar=round(mp * 0.50, 2),
+        )
+
     # ── Telegram message formatter ────────────────────────────────────────────
 
     def format_telegram_message(self, signal: StrategySignal) -> str:
@@ -513,6 +718,38 @@ class OptionsStrategyEngine:
             legs = (
                 f"  מכור Put `${s.leg1_strike}` / מכור Call `${s.leg2_strike}`\n"
                 f"  קרדיט נטו: `${s.net_credit}` | ⚠️ סיכון בלתי מוגבל"
+            )
+        elif n == "calendar_spread":
+            legs = (
+                f"   מכור Call/Put ${s.leg1_strike} — פקיעה {s.near_expiry} ({s.near_dte} ימים)\n"
+                f"   קנה  Call/Put ${s.leg2_strike} — פקיעה {s.far_expiry}  ({s.far_dte} ימים)\n"
+                f"   אותו סטרייק ATM | דביט נטו: ${s.net_debit}"
+            )
+        elif n == "butterfly":
+            legs = (
+                f"   קנה  Call ${s.leg1_strike} (1x)\n"
+                f"   מכור Call ${s.leg2_strike} (2x) ← מרוויח אם מניה נוחתת כאן\n"
+                f"   קנה  Call ${s.leg3_strike} (1x)\n"
+                f"   דביט נטו: ${s.net_debit}"
+            )
+        elif n == "call_back_ratio":
+            credit_or_debit = (
+                f"קרדיט נטו: ${s.net_credit}" if s.net_credit > 0
+                else f"דביט נטו: ${s.net_debit}" if s.net_debit > 0
+                else "עלות אפס (Zero Cost)"
+            )
+            legs = (
+                f"   מכור {s.ratio_short}x Call ${s.leg1_strike} (ATM)\n"
+                f"   קנה  {s.ratio_long}x Call ${s.leg2_strike} (OTM)\n"
+                f"   {credit_or_debit}\n"
+                f"   רווח בלתי מוגבל מעל ${s.leg2_strike}"
+            )
+        elif n == "broken_wing_butterfly":
+            legs = (
+                f"   קנה  Put ${s.leg1_strike} (1x) — כנף תחתונה\n"
+                f"   מכור Put ${s.leg2_strike} (2x) — סטרייק קצר\n"
+                f"   קנה  Put ${s.leg3_strike} (1x) — כנף עליונה שבורה ⚡\n"
+                f"   קרדיט נטו: ${s.net_credit} | פוטנציאל שחיקה: ${s.skip_width:.0f}"
             )
         else:
             legs = "  ראה פרטים למעלה"
