@@ -120,46 +120,106 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 
-async def cmd_options(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_options_0dte(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /options — Show current SPX 0DTE Iron Condor setup.
+    Falls back to theoretical setup when live data is unavailable
+    (outside market hours or yfinance data gap).
+    """
     if not _is_authorized(update):
         return
     await update.message.reply_text("⏳ בונה ספרד 0DTE SPX...")
     try:
-        from app.services.options_service import OptionsService
-        svc   = OptionsService()
-        ctx   = svc.get_market_context()
-        setup = svc.build_0dte_spx_setup(ctx.get("vix") or 15.0)
-        if not setup:
-            await update.message.reply_text("⚠️ לא ניתן לבנות ספרד 0DTE — אין נתוני אופציות.")
-            return
-        vix = ctx.get("vix", 0)
-        spy = ctx.get("spx_price", 0)
-        exp = setup.get("expiry", "N/A")
-        cr  = setup.get("total_credit", 0)
-        sl  = setup.get("stop_loss", 0)
-        pt  = setup.get("profit_target", 0)
-
-        ps = setup.get("put_spread", {})
-        cs = setup.get("call_spread", {})
-
-        text = (
-            f"🦅 *0DTE SPX Iron Condor — {exp}*\n\n"
-            f"SPY: `${spy:,.2f}` | VIX: `{vix:.1f}`\n\n"
-            f"📉 *Put Spread (Bull)*\n"
-            f"Short: `{ps.get('short_strike','N/A')}` | Long: `{ps.get('long_strike','N/A')}`\n"
-            f"Delta: `{ps.get('short_delta','N/A')}`\n\n"
-            f"📈 *Call Spread (Bear)*\n"
-            f"Short: `{cs.get('short_strike','N/A')}` | Long: `{cs.get('long_strike','N/A')}`\n"
-            f"Delta: `{cs.get('short_delta','N/A')}`\n\n"
-            f"💰 קרדיט כולל: `${cr:.2f}`\n"
-            f"🎯 יעד רווח (50%): `${pt:.2f}`\n"
-            f"🛑 סטופ לוס (2×): `${sl:.2f}`\n"
-        )
+        result = await asyncio.to_thread(_run_options_0dte_sync)
+        await update.message.reply_text(result, parse_mode="Markdown")
     except Exception as exc:
-        logger.exception("cmd_options failed")
-        text = f"❌ שגיאה בבניית הספרד: {exc}"
+        logger.exception("cmd_options_0dte failed")
+        await update.message.reply_text(
+            f"❌ שגיאה בבניית ספרד 0DTE: {exc}\n"
+            f"💡 נסה שוב במהלך שעות המסחר (15:30–22:00 שעון ישראל)"
+        )
 
-    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+def _run_options_0dte_sync() -> str:
+    """
+    Build 0DTE SPX Iron Condor setup.
+    Primary: live data from OptionsService.
+    Fallback: theoretical setup based on current SPY price + VIX.
+    """
+    import yfinance as yf
+    from app.services.iv_calculator import get_vix_level
+
+    vix = get_vix_level()
+
+    # ── Try live OptionsService first ─────────────────────────────────────
+    try:
+        from app.services.options_service import OptionsService
+        svc    = OptionsService()
+        report = svc.build_report([], [])   # empty lists = SPX only
+        spx    = report.get("spx_setup")
+
+        if spx:
+            put_sell  = spx.get("put_sell",  "N/A")
+            put_buy   = spx.get("put_buy",   "N/A")
+            call_sell = spx.get("call_sell", "N/A")
+            call_buy  = spx.get("call_buy",  "N/A")
+            credit    = spx.get("credit",    0)
+            max_loss  = spx.get("max_loss",  0)
+            rr        = spx.get("risk_reward", 0)
+            spy_price = report.get("spx_price", "N/A")
+
+            return (
+                f"🦅 *Iron Condor 0DTE — SPX*\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"💹 SPY: ${spy_price} | VIX: {vix:.1f}\n\n"
+                f"📐 *מבנה העסקה:*\n"
+                f"   מכור Put  ${put_sell} / קנה Put  ${put_buy}\n"
+                f"   מכור Call ${call_sell} / קנה Call ${call_buy}\n\n"
+                f"💰 *מטריקות:*\n"
+                f"   קרדיט: ${credit:.2f} | הפסד מקס: ${max_loss:.2f}\n"
+                f"   יחס R/R: {rr:.2f}\n\n"
+                f"🏁 *כללי ניהול:*\n"
+                f"   סגור ב-50% רווח\n"
+                f"   Stop-loss: 2x הקרדיט\n"
+                f"   כניסה: 9:45–10:30 ET\n\n"
+                f"⚠️ _0DTE בלבד — פקיעה היום!_"
+            )
+    except Exception as e:
+        logger.warning("OptionsService failed: %s — using fallback", e)
+
+    # ── Fallback: theoretical setup ────────────────────────────────────────
+    try:
+        spy_price = yf.Ticker("SPY").fast_info.last_price or 500.0
+    except Exception:
+        spy_price = 500.0
+
+    width     = 5.0 if vix <= 20 else 3.0
+    put_sell  = round(spy_price * 0.993)
+    put_buy   = round(put_sell - width)
+    call_sell = round(spy_price * 1.007)
+    call_buy  = round(call_sell + width)
+    credit_est = round(width * 0.30, 2)
+    max_loss   = round((width - credit_est) * 100, 2)
+    rr_est     = round((credit_est * 100) / max_loss, 2) if max_loss > 0 else 0
+    vix_label  = "גבוה ⚠️" if vix > 25 else ("בינוני" if vix > 18 else "נמוך ✅")
+
+    return (
+        f"🦅 *Iron Condor 0DTE — SPX (תיאורטי)*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💹 SPY: ~${spy_price:.0f} | VIX: {vix:.1f} ({vix_label})\n\n"
+        f"📐 *מבנה מוצע:*\n"
+        f"   מכור Put  ${put_sell} / קנה Put  ${put_buy}\n"
+        f"   מכור Call ${call_sell} / קנה Call ${call_buy}\n\n"
+        f"💰 *הערכת מטריקות:*\n"
+        f"   קרדיט משוער: ~${credit_est} | הפסד מקס: ~${max_loss:.0f}\n"
+        f"   יחס R/R: ~{rr_est}\n\n"
+        f"🏁 *כללי ניהול:*\n"
+        f"   סגור ב-50% רווח\n"
+        f"   Stop-loss: 2x הקרדיט\n"
+        f"   כניסה: 9:45–10:30 ET\n\n"
+        f"⚠️ _נתונים תיאורטיים — אין נתוני אופציות חיים כרגע._\n"
+        f"💡 _הרץ שוב במהלך שעות המסחר לנתונים מדויקים._"
+    )
 
 
 _VALID_SOURCES = {"finviz", "tv", "both"}
@@ -313,64 +373,95 @@ async def cmd_strategies(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """
     /strategies [TICKER1 TICKER2 ...]
 
-    Run the multi-strategy options engine. Without args: scans top Finviz gainers/losers.
-    With args: analyze specific tickers only (max 8).
+    Run the multi-strategy options engine. Without args: scans fresh Finviz tickers.
+    With args: analyze specific tickers only (max 10).
     """
     if not _is_authorized(update):
         return
 
-    args = context.args
+    args = list(context.args) if context.args else []
     await update.message.reply_text("⏳ מריץ מנוע אסטרטגיות אופציות...")
 
     try:
-        from app.services.options_strategy_engine import OptionsStrategyEngine
-        from app.services.iv_calculator import get_iv_rank, get_vix_level, check_earnings_soon
-        import yfinance as yf
-
-        engine    = OptionsStrategyEngine()
-        vix       = get_vix_level()
-        results   = []
-
-        if args:
-            tickers = [t.upper() for t in args[:8]]
-        else:
-            from app.services.finviz_service import FinvizService
-            tickers = FinvizService.get_bullish_tickers(n=6) + FinvizService.get_bearish_tickers(n=4)
-
-        for ticker in tickers[:10]:
-            try:
-                price = yf.Ticker(ticker).fast_info.last_price
-                if not price:
-                    continue
-                iv_rank  = get_iv_rank(ticker)
-                earnings = check_earnings_soon(ticker)
-                # Try neutral first; if no signal try bullish/bearish
-                for trend in ("neutral", "bullish", "bearish", "strong_bullish", "strong_bearish"):
-                    signal = engine.select_strategy(
-                        ticker=ticker, price=price, trend=trend,
-                        iv_rank=iv_rank, rsi=50.0, vix_level=vix,
-                        has_earnings_soon=earnings,
-                    )
-                    if signal:
-                        results.append(signal)
-                        break
-            except Exception:
-                continue
-
-        if not results:
-            await update.message.reply_text("⚠️ לא נמצאו אותות אסטרטגיה כעת.")
+        messages = await asyncio.to_thread(_run_strategies_sync, args)
+        if not messages:
+            await update.message.reply_text("⚠️ לא נמצאו אותות אסטרטגיה בתנאי השוק הנוכחיים.")
             return
-
-        for signal in results:
-            msg = engine.format_telegram_message(signal)
+        for msg in messages:
             try:
                 await update.message.reply_text(msg, parse_mode="Markdown")
             except Exception:
                 await update.message.reply_text(msg)
-
     except Exception as exc:
         logger.exception("cmd_strategies failed")
         await update.message.reply_text(f"❌ שגיאה במנוע אסטרטגיות: {exc}")
+
+
+def _run_strategies_sync(args: list) -> list[str]:
+    """
+    Returns list of formatted Telegram messages, one per signal.
+    Fetches fresh Finviz tickers every time, assigns correct trend per ticker.
+    """
+    import yfinance as yf
+    from app.services.options_strategy_engine import OptionsStrategyEngine
+    from app.services.iv_calculator import get_iv_rank, get_vix_level, check_earnings_soon
+    from app.services.finviz_service import FinvizService
+
+    engine   = OptionsStrategyEngine()
+    vix      = get_vix_level()
+    messages = []
+
+    if args:
+        # User provided specific tickers — use neutral trend as default
+        tickers_with_trend = [(t.upper(), "neutral") for t in args[:10]]
+    else:
+        # Fetch FRESH tickers from Finviz — do this ONCE, not inside a loop
+        bull_tickers = FinvizService.get_bullish_tickers(n=10)
+        bear_tickers = FinvizService.get_bearish_tickers(n=5)
+
+        # Build list of (ticker, trend) pairs — no duplicates
+        seen: set[str] = set()
+        tickers_with_trend: list[tuple[str, str]] = []
+        for t in bull_tickers:
+            if t not in seen:
+                tickers_with_trend.append((t, "bullish"))
+                seen.add(t)
+        for t in bear_tickers:
+            if t not in seen:
+                tickers_with_trend.append((t, "bearish"))
+                seen.add(t)
+
+    for ticker, trend in tickers_with_trend[:12]:
+        try:
+            price = yf.Ticker(ticker).fast_info.last_price
+            if not price:
+                continue
+
+            iv_rank  = get_iv_rank(ticker)
+            earnings = check_earnings_soon(ticker, days=7)
+
+            # Adjust RSI estimate based on trend for better strategy matching
+            rsi_estimate = 45.0 if trend == "bullish" else (60.0 if trend == "bearish" else 50.0)
+
+            signal = engine.select_strategy(
+                ticker=ticker,
+                price=price,
+                trend=trend,      # type: ignore[arg-type]
+                iv_rank=iv_rank,
+                rsi=rsi_estimate,
+                vix_level=vix,
+                has_earnings_soon=earnings,
+                dte_preference=35,
+            )
+            if signal:
+                signal.telegram_message = engine.format_telegram_message(signal)
+                messages.append(signal.telegram_message)
+
+        except Exception as e:
+            logger.warning("strategies %s: %s", ticker, e)
+            continue
+
+    return messages
 
 
 async def cmd_quick_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -967,7 +1058,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("start",        cmd_start))
     app.add_handler(CommandHandler("help",         cmd_help))
     app.add_handler(CommandHandler("status",       cmd_status))
-    app.add_handler(CommandHandler("options",      cmd_options))
+    app.add_handler(CommandHandler("options",      cmd_options_0dte))
     app.add_handler(CommandHandler("scan",         cmd_scan))
 
     # ── Deep dive GS research note + email (was /analyze) ────────────────────
