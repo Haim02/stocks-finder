@@ -250,6 +250,38 @@ class MongoDB:
             logger.exception("Failed to check options cooldown for %s", ticker)
             return False
 
+    # --- Strategy Cooldown ---
+
+    @classmethod
+    def log_strategy_sent(cls, ticker: str, strategy_name: str, price: float) -> None:
+        """Records that a strategy was recommended for a ticker via /strategies."""
+        try:
+            db = cls.get_db()
+            db.sent_strategies.insert_one({
+                "ticker":        ticker.upper(),
+                "strategy_name": strategy_name,
+                "price":         price,
+                "sent_at":       datetime.now(pytz.utc),
+            })
+        except Exception:
+            logger.exception("Failed to log strategy sent for %s", ticker)
+
+    @classmethod
+    def was_strategy_sent_recently(cls, ticker: str, days: int = 5) -> bool:
+        """Returns True if a strategy was sent for this ticker within the last `days` days."""
+        try:
+            db = cls.get_db()
+            cutoff = datetime.now(pytz.utc) - timedelta(days=days)
+            return (
+                db.sent_strategies.count_documents(
+                    {"ticker": ticker.upper(), "sent_at": {"$gte": cutoff}}
+                )
+                > 0
+            )
+        except Exception:
+            logger.exception("Failed to check strategy cooldown for %s", ticker)
+            return False
+
     @classmethod
     def save_institutional_pick(cls, pick_data: dict):
         """Saves a stock that passed the Smart Money filter (upsert per day)."""

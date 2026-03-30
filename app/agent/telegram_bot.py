@@ -397,29 +397,48 @@ async def cmd_strategies(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(f"❌ שגיאה במנוע אסטרטגיות: {exc}")
 
 
+def _log_ticker_for_training(ticker: str, price: float, strategy_name: str) -> None:
+    """Fire-and-forget: log this ticker to training_events for future XGBoost labeling."""
+    try:
+        from app.services.training_logger import log_training_event
+        from app.services.ml_service import predict_confidence
+        xgb_conf = predict_confidence(ticker)
+        log_training_event(
+            ticker=ticker,
+            source="strategies_bot",
+            price=price,
+            xgb_conf=xgb_conf,
+            strategy_name=strategy_name,
+        )
+    except Exception:
+        logger.debug("_log_ticker_for_training failed for %s", ticker, exc_info=True)
+
+
 def _run_strategies_sync(args: list) -> list[str]:
     """
     Returns list of formatted Telegram messages, one per signal.
-    Fetches fresh Finviz tickers every time, assigns correct trend per ticker.
+    - Applies 5-day cooldown per ticker (via MongoDB sent_strategies).
+    - Uses real RSI from yfinance history.
+    - Uses chart patterns to refine trend if available.
+    - Logs each sent strategy to MongoDB + training_events.
     """
     import yfinance as yf
     from app.services.options_strategy_engine import OptionsStrategyEngine
     from app.services.iv_calculator import get_iv_rank, get_vix_level, check_earnings_soon
     from app.services.finviz_service import FinvizService
+    from app.data.mongo_client import MongoDB
+    from app.ta.chart_patterns import analyze_chart
 
     engine   = OptionsStrategyEngine()
     vix      = get_vix_level()
     messages = []
 
     if args:
-        # User provided specific tickers — use neutral trend as default
         tickers_with_trend = [(t.upper(), "neutral") for t in args[:10]]
     else:
-        # Fetch FRESH tickers from Finviz — do this ONCE, not inside a loop
         bull_tickers = FinvizService.get_bullish_tickers(n=10)
         bear_tickers = FinvizService.get_bearish_tickers(n=5)
 
-        # Build list of (ticker, trend) pairs — no duplicates
         seen: set[str] = set()
         tickers_with_trend: list[tuple[str, str]] = []
         for t in bull_tickers:
@@ -432,30 +451,58 @@ def _run_strategies_sync(args: list) -> list[str]:
                 seen.add(t)
 
     for ticker, trend in tickers_with_trend[:12]:
+        # 5-day cooldown — skip tickers we recommended recently
+        if not args and MongoDB.was_strategy_sent_recently(ticker, days=5):
+            logger.info("strategies: %s in cooldown — skipping", ticker)
+            continue
+
         try:
-            price = yf.Ticker(ticker).fast_info.last_price
+            stock = yf.Ticker(ticker)
+            price = stock.fast_info.last_price
             if not price:
                 continue
 
+            # Real RSI from 3-month history
+            try:
+                hist  = stock.history(period="3mo")
+                close = hist["Close"].dropna()
+                delta = close.diff()
+                gain  = delta.clip(lower=0).rolling(14).mean().iloc[-1]
+                loss  = (-delta.clip(upper=0)).rolling(14).mean().iloc[-1]
+                rsi   = round(100 - 100 / (1 + gain / max(loss, 1e-9)), 1) if len(close) >= 14 else 50.0
+
+                # Chart pattern analysis — may override Finviz trend
+                chart = analyze_chart(ticker, hist)
+                if chart["trend_override"] and not args:
+                    trend = chart["trend_override"]
+            except Exception:
+                rsi  = 45.0 if trend == "bullish" else (60.0 if trend == "bearish" else 50.0)
+                chart = {"summary": ""}
+
             iv_rank  = get_iv_rank(ticker)
             earnings = check_earnings_soon(ticker, days=7)
-
-            # Adjust RSI estimate based on trend for better strategy matching
-            rsi_estimate = 45.0 if trend == "bullish" else (60.0 if trend == "bearish" else 50.0)
 
             signal = engine.select_strategy(
                 ticker=ticker,
                 price=price,
                 trend=trend,      # type: ignore[arg-type]
                 iv_rank=iv_rank,
-                rsi=rsi_estimate,
+                rsi=rsi,
                 vix_level=vix,
                 has_earnings_soon=earnings,
                 dte_preference=35,
             )
             if signal:
                 signal.telegram_message = engine.format_telegram_message(signal)
+                chart_note = chart.get("summary", "")
+                if chart_note:
+                    signal.telegram_message += f"\n{chart_note}"
                 messages.append(signal.telegram_message)
+
+                # Log cooldown + training data
+                if not args:
+                    MongoDB.log_strategy_sent(ticker, signal.strategy_name, price)
+                _log_ticker_for_training(ticker, price, signal.strategy_name)
 
         except Exception as e:
             logger.warning("strategies %s: %s", ticker, e)
@@ -858,9 +905,12 @@ def _sync_analyze_ticker(ticker: str) -> str:
     xgb_label = get_xgb_label(xgb_conf if xgb_conf is not None else 0.0)
     xgb_line  = f"`{xgb_conf:.1f}%` {xgb_label}" if xgb_conf is not None else "N/A"
 
-    # Quick technicals from 3-month history
+    # Quick technicals + chart patterns from 3-month history
+    chart_summary = ""
     try:
-        hist  = stock.history(period="3mo")["Close"]
+        from app.ta.chart_patterns import analyze_chart
+        hist_df = stock.history(period="6mo")
+        hist    = hist_df["Close"].dropna()
         sma50 = float(hist.rolling(50).mean().iloc[-1]) if len(hist) >= 50 else None
         delta = hist.diff()
         gain  = delta.clip(lower=0).rolling(14).mean().iloc[-1]
@@ -872,6 +922,10 @@ def _sync_analyze_ticker(ticker: str) -> str:
             trend = "bearish"
         else:
             trend = "neutral"
+        chart = analyze_chart(ticker, hist_df)
+        chart_summary = chart.get("summary", "")
+        if chart["trend_override"]:
+            trend = chart["trend_override"]
     except Exception:
         rsi, trend = 50.0, "neutral"
 
@@ -903,8 +957,10 @@ def _sync_analyze_ticker(ticker: str) -> str:
         f"🌡️ VIX: `{vix:.1f}`\n\n"
     )
 
+    chart_block = f"\n{chart_summary}\n" if chart_summary else ""
+
     if best:
-        return header + engine.format_telegram_message(best)
+        return header + chart_block + engine.format_telegram_message(best)
 
     iv_env = (
         "גבוה — שקול מכירת פרמיה" if iv_rank > 50
@@ -912,6 +968,7 @@ def _sync_analyze_ticker(ticker: str) -> str:
     )
     return (
         header
+        + chart_block
         + f"💡 סביבת IV: *{iv_env}*\n"
         + "⚠️ אין איתות אסטרטגיה ברור בתנאים הנוכחיים.\n"
         + "בדוק שוב כשה-IVR יעלה מעל 30 או יירד מתחת ל-25."

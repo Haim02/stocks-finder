@@ -37,6 +37,8 @@ from app.services.finviz_service import FinvizService
 from app.services.ml_service import predict_confidence
 from app.services.news_scraper import NewsScraper
 from app.services.options_service import OptionsService
+from app.services.training_logger import log_training_event
+from app.ta.chart_patterns import analyze_chart
 
 logging.basicConfig(
     level=logging.INFO,
@@ -164,6 +166,15 @@ def run_options_scan() -> None:
     ticker_context: dict[str, dict] = {}
     for t in bullish + bearish:
         ctx = _fetch_ticker_context(t, scraper)
+        # Chart pattern analysis
+        try:
+            _hist = yf.Ticker(t).history(period="6mo")
+            _chart = analyze_chart(t, _hist)
+            ctx["chart_patterns"] = _chart.get("patterns", [])
+            ctx["chart_summary"]  = _chart.get("summary", "")
+        except Exception:
+            ctx["chart_patterns"] = []
+            ctx["chart_summary"]  = ""
         ticker_context[t] = ctx
         logger.info("%s: %d headline(s) fetched", t, len(ctx["news_headlines"]))
 
@@ -247,6 +258,19 @@ def run_options_scan() -> None:
 
                 signal.telegram_message = strategy_engine.format_telegram_message(signal)
                 strategy_signals.append(signal)
+
+                # Log to training_events for future XGBoost labeling
+                try:
+                    _conf = predict_confidence(t)
+                    log_training_event(
+                        ticker=t,
+                        source="options_scan",
+                        price=price,
+                        xgb_conf=_conf,
+                        strategy_name=signal.strategy_name,
+                    )
+                except Exception:
+                    pass
 
                 opt["strategy_signal"] = {
                     "name":       signal.strategy_name,

@@ -141,6 +141,8 @@ _FINVIZ_URL = (
 from app.ta.engine import TAEngine
 from app.services.email_service import EmailService
 from app.services.ai_service import AIService
+from app.services.training_logger import log_training_event
+from app.ta.chart_patterns import analyze_chart
 
 def run_scan():
     print("🚀 Starting Professional AI Scan...")
@@ -171,6 +173,17 @@ def run_scan():
 
                 score = analysis.get('score', 0)
 
+                # Chart pattern analysis — append to analysis for email context
+                try:
+                    import yfinance as _yf
+                    _hist = _yf.Ticker(ticker).history(period="6mo")
+                    _chart = analyze_chart(ticker, _hist)
+                    analysis['chart_patterns'] = _chart.get('patterns', [])
+                    analysis['chart_summary']  = _chart.get('summary', '')
+                except Exception:
+                    analysis['chart_patterns'] = []
+                    analysis['chart_summary']  = ''
+
                 # רק מניות עם ציון טוב עוברות לניתוח AI מלא
                 if score >= 0:
                     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -200,6 +213,20 @@ def run_scan():
                         analysis['ai_report'] = ai_report
                         analysis['company_name'] = company_info.get('name', ticker)
                         analysis['industry'] = company_info.get('industry', 'N/A')
+
+                        # Log to training_events for future XGBoost labeling
+                        try:
+                            from app.services.ml_service import predict_confidence
+                            _conf = predict_confidence(ticker)
+                            log_training_event(
+                                ticker=ticker,
+                                source="daily_scan",
+                                price=float(analysis['price']),
+                                xgb_conf=_conf,
+                                ai_score=score,
+                            )
+                        except Exception:
+                            pass
 
                         # שמירה ל-DB
                         new_alert = AlertHistory(
