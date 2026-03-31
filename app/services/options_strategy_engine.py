@@ -152,7 +152,7 @@ class OptionsStrategyEngine:
             s.rationale = "עסקת דוחות — צפויה תנועה חדה, כיוון לא ידוע"
             return s
 
-        if iv_rank > 50 and trend == "neutral":
+        if iv_rank >= 35 and trend == "neutral":
             s = self._build_iron_condor(**kw)
             s.rationale = "IVR גבוה + שוק ניטרלי — גביית פרמיה משני הצדדים (אזור רווח 10-15%)"
             return s
@@ -174,9 +174,9 @@ class OptionsStrategyEngine:
             s.rationale = "IV בינוני + נטייה שורית — מבנה א-סימטרי עם קרדיט נטו"
             return s
 
-        if iv_rank > 30 and trend in ("bullish", "neutral") and rsi < 60:
+        if iv_rank >= 25 and trend in ("bullish", "neutral") and rsi < 60:
             s = self._build_bull_put_spread(**kw)
-            s.rationale = "IVR > 30 + נטייה שורית + RSI < 60 — קרדיט מתחת לתמיכה, ~0.20 דלתא, PoP 68%"
+            s.rationale = "IVR > 25 + נטייה שורית + RSI < 60 — קרדיט מתחת לתמיכה, ~0.20 דלתא, PoP 68%"
             return s
 
         if iv_rank > 50 and trend in ("bullish", "strong_bullish") and rsi < 35:

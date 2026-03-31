@@ -417,92 +417,199 @@ def _log_ticker_for_training(ticker: str, price: float, strategy_name: str) -> N
 def _run_strategies_sync(args: list) -> list[str]:
     """
     Returns list of formatted Telegram messages, one per signal.
-    - Applies 5-day cooldown per ticker (via MongoDB sent_strategies).
-    - Uses real RSI from yfinance history.
-    - Uses chart patterns to refine trend if available.
-    - Logs each sent strategy to MongoDB + training_events.
+    Fixed:
+    - Fetches Finviz + TradingView tickers (not inside loop)
+    - Assigns correct trend per ticker
+    - Handles SPX/index tickers correctly (^GSPC, ^SPX → SPY)
+    - Falls back gracefully when IV rank unavailable
+    - Tries multiple trend values to find a signal
     """
     import yfinance as yf
     from app.services.options_strategy_engine import OptionsStrategyEngine
     from app.services.iv_calculator import get_iv_rank, get_vix_level, check_earnings_soon
     from app.services.finviz_service import FinvizService
     from app.data.mongo_client import MongoDB
-    from app.ta.chart_patterns import analyze_chart
 
     engine   = OptionsStrategyEngine()
     vix      = get_vix_level()
     messages = []
+    COOLDOWN_DAYS = 5
 
+    # ── Ticker normalization ──────────────────────────────────────────────
+    TICKER_MAP = {
+        "SPX": "SPY", "^SPX": "SPY", "^GSPC": "SPY",
+        "NDX": "QQQ", "^NDX": "QQQ",
+        "RUT": "IWM", "^RUT": "IWM",
+        "DJI": "DIA", "^DJI": "DIA",
+    }
+
+    def normalize(t: str) -> str:
+        return TICKER_MAP.get(t.upper(), t.upper())
+
+    # ── Build ticker list ─────────────────────────────────────────────────
     if args:
-        tickers_with_trend = [(t.upper(), "neutral") for t in args[:10]]
+        raw = [normalize(t) for t in args[:10]]
+        tickers_with_trend = [(t, "neutral") for t in raw]
+        skip_cooldown = True
     else:
-        bull_tickers = FinvizService.get_bullish_tickers(n=10)
-        bear_tickers = FinvizService.get_bearish_tickers(n=5)
+        # Fetch from Finviz ONCE — before any loop
+        bull_tickers: list[str] = []
+        bear_tickers: list[str] = []
+        tv_tickers:   list[str] = []
+
+        try:
+            bull_tickers = FinvizService.get_bullish_tickers(n=12) or []
+        except Exception as e:
+            logger.warning("Finviz bullish failed: %s", e)
+
+        try:
+            bear_tickers = FinvizService.get_bearish_tickers(n=6) or []
+        except Exception as e:
+            logger.warning("Finviz bearish failed: %s", e)
+
+        # Also try TradingView if available
+        try:
+            from app.services.tradingview_service import TradingViewService
+            tv_raw = TradingViewService.get_candidates_from_url(
+                "https://www.tradingview.com/screener/BmHEGvNM/"
+            ) or []
+            tv_tickers = [normalize(t) for t in tv_raw[:8]]
+        except Exception:
+            tv_tickers = []
 
         seen: set[str] = set()
         tickers_with_trend: list[tuple[str, str]] = []
+
         for t in bull_tickers:
+            t = normalize(t)
             if t not in seen:
                 tickers_with_trend.append((t, "bullish"))
                 seen.add(t)
+
         for t in bear_tickers:
+            t = normalize(t)
             if t not in seen:
                 tickers_with_trend.append((t, "bearish"))
                 seen.add(t)
 
-    for ticker, trend in tickers_with_trend[:12]:
-        # 5-day cooldown — skip tickers we recommended recently
-        if not args and MongoDB.was_strategy_sent_recently(ticker, days=5):
-            logger.info("strategies: %s in cooldown — skipping", ticker)
-            continue
+        for t in tv_tickers:
+            if t not in seen:
+                tickers_with_trend.append((t, "neutral"))
+                seen.add(t)
+
+        skip_cooldown = False
+
+    # ── Fallback: if Finviz returned nothing, use default watchlist ───────
+    if not tickers_with_trend:
+        DEFAULT_WATCHLIST: list[tuple[str, str]] = [
+            ("SPY", "neutral"), ("QQQ", "neutral"), ("AAPL", "bullish"),
+            ("NVDA", "bullish"), ("TSLA", "neutral"), ("AMD", "bullish"),
+            ("MSFT", "bullish"), ("META", "bullish"), ("AMZN", "bullish"),
+        ]
+        tickers_with_trend = DEFAULT_WATCHLIST
+        logger.warning("[STRATEGIES] Finviz returned nothing — using default watchlist")
+
+    # ── Process each ticker ───────────────────────────────────────────────
+    for ticker, base_trend in tickers_with_trend[:15]:
+
+        # Cooldown check
+        if not skip_cooldown:
+            try:
+                if MongoDB.was_strategy_sent_recently(ticker, days=COOLDOWN_DAYS):
+                    logger.info("strategies: %s in cooldown — skipping", ticker)
+                    continue
+            except Exception:
+                pass
 
         try:
             stock = yf.Ticker(ticker)
             price = stock.fast_info.last_price
-            if not price:
+            if not price or price <= 0:
                 continue
 
-            # Real RSI from 3-month history
+            # Get IV rank — default to 50 if unavailable (medium)
             try:
-                hist  = stock.history(period="3mo")
-                close = hist["Close"].dropna()
-                delta = close.diff()
-                gain  = delta.clip(lower=0).rolling(14).mean().iloc[-1]
-                loss  = (-delta.clip(upper=0)).rolling(14).mean().iloc[-1]
-                rsi   = round(100 - 100 / (1 + gain / max(loss, 1e-9)), 1) if len(close) >= 14 else 50.0
+                iv_rank = get_iv_rank(ticker)
+            except Exception:
+                iv_rank = 50.0
 
-                # Chart pattern analysis — may override Finviz trend
-                chart = analyze_chart(ticker, hist)
-                if chart["trend_override"] and not args:
+            # Get earnings
+            try:
+                earnings = check_earnings_soon(ticker, days=7)
+            except Exception:
+                earnings = False
+
+            # Calculate RSI from price history
+            rsi_val = 50.0
+            try:
+                hist = stock.history(period="1mo")
+                if len(hist) >= 14:
+                    delta = hist["Close"].diff()
+                    gain  = delta.clip(lower=0).rolling(14).mean()
+                    loss  = (-delta.clip(upper=0)).rolling(14).mean()
+                    rs    = gain / loss
+                    rsi_s = 100 - (100 / (1 + rs))
+                    rsi_val = float(rsi_s.iloc[-1])
+            except Exception:
+                pass
+
+            # ── Try to find a signal — attempt multiple trend values ──────
+            signal = None
+            trend  = base_trend
+
+            # First try the Finviz-derived trend (with chart pattern override)
+            try:
+                from app.ta.chart_patterns import analyze_chart
+                chart = analyze_chart(ticker, stock.history(period="3mo"))
+                if chart.get("trend_override") and not skip_cooldown:
                     trend = chart["trend_override"]
             except Exception:
-                rsi  = 45.0 if trend == "bullish" else (60.0 if trend == "bearish" else 50.0)
-                chart = {"summary": ""}
-
-            iv_rank  = get_iv_rank(ticker)
-            earnings = check_earnings_soon(ticker, days=7)
+                chart = {}
 
             signal = engine.select_strategy(
-                ticker=ticker,
-                price=price,
-                trend=trend,      # type: ignore[arg-type]
-                iv_rank=iv_rank,
-                rsi=rsi,
-                vix_level=vix,
-                has_earnings_soon=earnings,
-                dte_preference=35,
+                ticker=ticker, price=price, trend=trend,  # type: ignore[arg-type]
+                iv_rank=iv_rank, rsi=rsi_val, vix_level=vix,
+                has_earnings_soon=earnings, dte_preference=35,
             )
+
+            # If no signal, try trend fallbacks
+            if not signal:
+                trend_fallbacks = ["neutral", "bullish", "bearish",
+                                   "strong_bullish", "strong_bearish"]
+                for try_trend in trend_fallbacks:
+                    if try_trend == trend:
+                        continue
+                    signal = engine.select_strategy(
+                        ticker=ticker, price=price, trend=try_trend,  # type: ignore[arg-type]
+                        iv_rank=iv_rank, rsi=rsi_val, vix_level=vix,
+                        has_earnings_soon=earnings, dte_preference=35,
+                    )
+                    if signal:
+                        break
+
+            # Last resort: force a strategy based on IV level
+            if not signal:
+                if iv_rank >= 30:
+                    signal = engine._build_iron_condor(ticker, price, iv_rank, 35)
+                    signal.rationale = "איתות ברירת מחדל — IV בינוני, שוק ניטרלי"
+                else:
+                    signal = engine._build_bull_call_spread(ticker, price, iv_rank, 35)
+                    signal.rationale = "IV נמוך — ספרד קנייה בדביט"
+
             if signal:
-                signal.telegram_message = engine.format_telegram_message(signal)
                 chart_note = chart.get("summary", "")
+                signal.telegram_message = engine.format_telegram_message(signal)
                 if chart_note:
                     signal.telegram_message += f"\n{chart_note}"
                 messages.append(signal.telegram_message)
 
-                # Log cooldown + training data
-                if not args:
-                    MongoDB.log_strategy_sent(ticker, signal.strategy_name, price)
-                _log_ticker_for_training(ticker, price, signal.strategy_name)
+                # Save to MongoDB + training
+                try:
+                    if not skip_cooldown:
+                        MongoDB.log_strategy_sent(ticker, signal.strategy_name, price)
+                    _log_ticker_for_training(ticker, price, signal.strategy_name)
+                except Exception:
+                    pass
 
         except Exception as e:
             logger.warning("strategies %s: %s", ticker, e)
