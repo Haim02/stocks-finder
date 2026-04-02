@@ -597,10 +597,52 @@ def _run_strategies_sync(args: list) -> list[str]:
                     signal.rationale = "IV נמוך — ספרד קנייה בדביט"
 
             if signal:
-                chart_note = chart.get("summary", "")
-                signal.telegram_message = engine.format_telegram_message(signal)
-                if chart_note:
-                    signal.telegram_message += f"\n{chart_note}"
+                # ── Per-ticker context: news + chart + liquidity ──────────
+                context_lines = []
+
+                # 1. Recent news headline
+                try:
+                    from app.services.news_scraper import NewsScraper
+                    scraper  = NewsScraper()
+                    raw_news = scraper.get_stock_news(ticker, limit=3)
+                    if raw_news:
+                        top = raw_news[0].get("headline", "")[:100]
+                        context_lines.append(f"📰 חדשות: _{top}_")
+                except Exception:
+                    pass
+
+                # 2. Chart pattern summary
+                try:
+                    chart_hist = stock.history(period="3mo")
+                    if not chart_hist.empty and len(chart_hist) >= 20:
+                        from app.ta.chart_patterns import analyze_chart
+                        chart_info = analyze_chart(ticker, chart_hist)
+                        if chart_info.get("summary"):
+                            context_lines.append(f"📊 {chart_info['summary']}")
+                        if chart_info.get("patterns"):
+                            context_lines.append(f"   תבנית: {chart_info['patterns'][0]}")
+                except Exception:
+                    pass
+
+                # 3. Liquidity check on real option data
+                try:
+                    from app.services.iv_calculator import get_real_option_data
+                    if signal.net_credit > 0:
+                        liq = get_real_option_data(ticker, signal.dte, option_type="put")
+                        vol = liq.get("volume", 0)
+                        oi  = liq.get("open_interest", 0)
+                        if vol < 10 or oi < 100:
+                            context_lines.append(f"⚠️ נזילות נמוכה: volume={vol}, OI={oi}")
+                        else:
+                            context_lines.append(f"✅ נזילות: volume={vol}, OI={oi}")
+                except Exception:
+                    pass
+
+                context_block = "\n".join(context_lines)
+                signal.telegram_message = (
+                    engine.format_telegram_message(signal)
+                    + (f"\n\n{context_block}" if context_block else "")
+                )
                 messages.append(signal.telegram_message)
 
                 # Save to MongoDB + training

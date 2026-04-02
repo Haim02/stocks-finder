@@ -252,105 +252,173 @@ class OptionsStrategyEngine:
     # ── Strategy builders ─────────────────────────────────────────────────────
 
     def _build_iron_condor(self, ticker, price, iv_rank, dte) -> StrategySignal:
-        sp   = round(price * 0.925)   # short put  — 7.5 % OTM
-        lp   = round(price * 0.875)   # long put   — wing
-        sc   = round(price * 1.075)   # short call — 7.5 % OTM
-        lc   = round(price * 1.125)   # long call  — wing
-        wing   = sp - lp
-        credit = wing * 0.40
-        mp     = credit * 100
-        ml     = (wing - credit) * 100
-        be_l   = sp - credit
-        be_h   = sc + credit
-        pop    = min(75.0, 50 + (be_h - be_l) / price * 120)
-        rr     = mp / ml if ml else 0
-        theta  = mp / (dte * 2) if dte else 0
-        exp    = get_nearest_expiry(ticker, dte)
+        """Iron Condor — uses real market data when available, falls back to theoretical."""
+        from app.services.iv_calculator import get_real_spread_data, get_nearest_expiry
+
+        real = get_real_spread_data(ticker, dte, "iron_condor")
+
+        if real and real.get("net_credit", 0) > 0:
+            sp       = real["put_short"]
+            lp       = real["put_long"]
+            sc       = real["call_short"]
+            lc       = real["call_long"]
+            credit   = real["net_credit"]
+            mp       = real["max_profit"]
+            ml       = real["max_loss"]
+            be_l     = real["be_low"]
+            be_h     = real["be_high"]
+            expiry   = real["expiry"]
+            real_dte = real["dte"]
+            iv_note  = ""
+        else:
+            sp = round(price * 0.925); lp = round(price * 0.875)
+            sc = round(price * 1.075); lc = round(price * 1.125)
+            wing   = sp - lp
+            credit = round(wing * 0.40, 2)
+            mp     = round(credit * 100, 2)
+            ml     = round((wing - credit) * 100, 2)
+            be_l   = round(sp - credit, 2)
+            be_h   = round(sc + credit, 2)
+            expiry = get_nearest_expiry(ticker, dte)
+            real_dte = dte
+            iv_note  = " (תיאורטי)"
+
+        pz  = (be_h - be_l) / price * 100
+        pop = min(75.0, 50 + pz * 1.2)
+        rr  = round(mp / ml, 2) if ml > 0 else 0
+
         return StrategySignal(
-            strategy_name="iron_condor", strategy_display="Iron Condor 🦅",
+            strategy_name="iron_condor", strategy_display=f"Iron Condor 🦅{iv_note}",
             category="NEUTRAL", ticker=ticker, underlying_price=price,
             leg1_strike=sp, leg2_strike=lp, leg3_strike=sc, leg4_strike=lc,
-            net_credit=round(credit, 2), max_profit=round(mp, 2), max_loss=round(ml, 2),
-            break_even_low=round(be_l, 2), break_even_high=round(be_h, 2),
-            probability_of_profit=round(pop, 1), risk_reward_ratio=round(rr, 2),
-            theta_daily=round(theta, 2), vega_per_1pct=round(-ml / 50, 2),
+            net_credit=credit, max_profit=mp, max_loss=ml,
+            break_even_low=be_l, break_even_high=be_h,
+            probability_of_profit=round(pop, 1), risk_reward_ratio=rr,
             target_delta=0.15,
-            expiry_date=exp, dte=dte, iv_rank=iv_rank,
+            expiry_date=expiry, dte=real_dte, iv_rank=iv_rank,
             close_target_dollar=round(credit * 0.50 * 100, 2), manage_at_dte=21,
         )
 
     def _build_bull_put_spread(self, ticker, price, iv_rank, dte) -> StrategySignal:
-        sp     = round(price * 0.95)   # short put ~0.20 delta
-        lp     = round(price * 0.90)   # long put
-        width  = sp - lp
-        credit = width * 0.40
-        mp     = credit * 100
-        ml     = (width - credit) * 100
-        be     = sp - credit
-        rr     = mp / ml if ml else 0
-        theta  = mp / (dte * 1.5) if dte else 0
-        exp    = get_nearest_expiry(ticker, dte)
+        """Bull Put Spread — uses real market data when available, falls back to theoretical."""
+        from app.services.iv_calculator import get_real_spread_data, get_nearest_expiry
+
+        real = get_real_spread_data(ticker, dte, "bull_put_spread")
+
+        if real and real.get("net_credit", 0) > 0:
+            sp       = real["short_strike"]
+            lp       = real["long_strike"]
+            credit   = real["net_credit"]
+            mp       = real["max_profit"]
+            ml       = real["max_loss"]
+            be       = real["break_even"]
+            expiry   = real["expiry"]
+            real_dte = real["dte"]
+            rr       = real.get("rr", round(mp / ml, 2) if ml > 0 else 0)
+            iv_note  = f" (IV: {real.get('short_iv', 0):.0f}%)" if real.get("short_iv") else ""
+        else:
+            sp = round(price * 0.95); lp = round(price * 0.90)
+            width  = sp - lp
+            credit = round(width * 0.40, 2)
+            mp     = round(credit * 100, 2)
+            ml     = round((width - credit) * 100, 2)
+            be     = round(sp - credit, 2)
+            expiry = get_nearest_expiry(ticker, dte)
+            real_dte = dte
+            rr     = round(mp / ml, 2) if ml > 0 else 0
+            iv_note = " (תיאורטי)"
+
         return StrategySignal(
-            strategy_name="bull_put_spread", strategy_display="Bull Put Spread 📈",
+            strategy_name="bull_put_spread", strategy_display=f"Bull Put Spread 🐂{iv_note}",
             category="BULLISH", ticker=ticker, underlying_price=price,
             leg1_strike=sp, leg2_strike=lp,
-            net_credit=round(credit, 2), max_profit=round(mp, 2), max_loss=round(ml, 2),
-            break_even_low=round(be, 2), break_even_high=round(price * 1.20, 2),
-            probability_of_profit=68.0, risk_reward_ratio=round(rr, 2),
-            theta_daily=round(theta, 2), vega_per_1pct=round(-ml / 60, 2),
+            net_credit=credit, max_profit=mp, max_loss=ml,
+            break_even_low=be, break_even_high=round(price * 1.20, 2),
+            probability_of_profit=68.0, risk_reward_ratio=rr,
             target_delta=0.20,
-            expiry_date=exp, dte=dte, iv_rank=iv_rank,
+            expiry_date=expiry, dte=real_dte, iv_rank=iv_rank,
             close_target_dollar=round(credit * 0.50 * 100, 2), manage_at_dte=21,
         )
 
     def _build_bear_call_spread(self, ticker, price, iv_rank, dte) -> StrategySignal:
-        sc     = round(price * 1.05)   # short call ~0.20 delta
-        lc     = round(price * 1.10)   # long call
-        width  = lc - sc
-        credit = width * 0.40
-        mp     = credit * 100
-        ml     = (width - credit) * 100
-        be     = sc + credit
-        rr     = mp / ml if ml else 0
-        theta  = mp / (dte * 1.5) if dte else 0
-        exp    = get_nearest_expiry(ticker, dte)
+        """Bear Call Spread — uses real market data when available, falls back to theoretical."""
+        from app.services.iv_calculator import get_real_spread_data, get_nearest_expiry
+
+        real = get_real_spread_data(ticker, dte, "bear_call_spread")
+
+        if real and real.get("net_credit", 0) > 0:
+            sc       = real["short_strike"]
+            lc       = real["long_strike"]
+            credit   = real["net_credit"]
+            mp       = real["max_profit"]
+            ml       = real["max_loss"]
+            be       = real["break_even"]
+            expiry   = real["expiry"]
+            real_dte = real["dte"]
+            rr       = real.get("rr", round(mp / ml, 2) if ml > 0 else 0)
+            iv_note  = ""
+        else:
+            sc = round(price * 1.05); lc = round(price * 1.10)
+            width  = lc - sc
+            credit = round(width * 0.40, 2)
+            mp     = round(credit * 100, 2)
+            ml     = round((width - credit) * 100, 2)
+            be     = round(sc + credit, 2)
+            expiry = get_nearest_expiry(ticker, dte)
+            real_dte = dte
+            rr     = round(mp / ml, 2) if ml > 0 else 0
+            iv_note = " (תיאורטי)"
+
         return StrategySignal(
-            strategy_name="bear_call_spread", strategy_display="Bear Call Spread 📉",
+            strategy_name="bear_call_spread", strategy_display=f"Bear Call Spread 🐻{iv_note}",
             category="BEARISH", ticker=ticker, underlying_price=price,
             leg1_strike=sc, leg2_strike=lc,
-            net_credit=round(credit, 2), max_profit=round(mp, 2), max_loss=round(ml, 2),
-            break_even_low=round(price * 0.80, 2), break_even_high=round(be, 2),
-            probability_of_profit=68.0, risk_reward_ratio=round(rr, 2),
-            theta_daily=round(theta, 2), vega_per_1pct=round(-ml / 60, 2),
+            net_credit=credit, max_profit=mp, max_loss=ml,
+            break_even_low=round(price * 0.80, 2), break_even_high=be,
+            probability_of_profit=68.0, risk_reward_ratio=rr,
             target_delta=0.20,
-            expiry_date=exp, dte=dte, iv_rank=iv_rank,
+            expiry_date=expiry, dte=real_dte, iv_rank=iv_rank,
             close_target_dollar=round(credit * 0.50 * 100, 2), manage_at_dte=21,
         )
 
     def _build_cash_secured_put(self, ticker, price, iv_rank, dte) -> StrategySignal:
-        strike  = round(price * 0.95)
-        iv      = max(iv_rank / 100, 0.20)
-        dte_use = max(dte, 30)   # CSP: minimum 30 DTE
-        premium = strike * iv * 0.30 * (dte_use / 365) ** 0.5
-        mp      = premium * 100
-        ml      = (strike - premium) * 100
-        be      = strike - premium
-        roc     = (premium / strike) * 100
-        ann     = roc * (365 / dte_use)
-        theta   = mp / (dte_use * 2) if dte_use else 0
-        exp     = get_nearest_expiry(ticker, dte_use)
+        """Cash-Secured Put — uses real market data when available, falls back to theoretical."""
+        from app.services.iv_calculator import get_real_option_data, get_nearest_expiry
+
+        dte_use = max(dte, 30)
+        real = get_real_option_data(ticker, dte_use, target_delta=0.30, option_type="put")
+
+        if real and real.get("mark", 0) > 0:
+            strike   = real["strike"]
+            premium  = real["mark"]
+            expiry   = real["expiry"]
+            real_dte = real["dte"]
+            iv_note  = f" (IV: {real.get('iv', 0):.0f}%)"
+        else:
+            strike   = round(price * 0.95)
+            iv       = max(iv_rank / 100, 0.20)
+            premium  = round(strike * iv * 0.30 * (dte_use / 365) ** 0.5, 2)
+            expiry   = get_nearest_expiry(ticker, dte_use)
+            real_dte = dte_use
+            iv_note  = " (תיאורטי)"
+
+        mp  = round(premium * 100, 2)
+        ml  = round((strike - premium) * 100, 2)
+        be  = round(strike - premium, 2)
+        roc = round((premium / strike) * 100, 2)
+        ann = round(roc * (365 / max(real_dte, 1)), 2)
+
         return StrategySignal(
-            strategy_name="cash_secured_put", strategy_display="Cash-Secured Put 💰",
+            strategy_name="cash_secured_put", strategy_display=f"Cash-Secured Put 💵{iv_note}",
             category="BULLISH", ticker=ticker, underlying_price=price,
             leg1_strike=strike,
-            net_credit=round(premium, 2), max_profit=round(mp, 2), max_loss=round(ml, 2),
-            break_even_low=round(be, 2), break_even_high=round(strike * 1.10, 2),
-            probability_of_profit=72.0,
-            theta_daily=round(theta, 2), vega_per_1pct=round(-ml / 80, 2),
+            net_credit=premium, max_profit=mp, max_loss=ml,
+            break_even_low=be, break_even_high=float(strike),
+            probability_of_profit=70.0,
             target_delta=0.20,
-            expiry_date=exp, dte=dte_use, iv_rank=iv_rank,
+            expiry_date=expiry, dte=real_dte, iv_rank=iv_rank,
             close_target_dollar=round(premium * 0.50 * 100, 2), manage_at_dte=21,
-            return_on_capital=round(roc, 2), annualized_return=round(ann, 2),
+            return_on_capital=roc, annualized_return=ann,
         )
 
     def _build_covered_call(self, ticker, price, iv_rank, dte) -> StrategySignal:
