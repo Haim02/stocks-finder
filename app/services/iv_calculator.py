@@ -121,21 +121,59 @@ def check_earnings_soon(ticker: str, days: int = 7) -> bool:
 
 def get_nearest_expiry(ticker: str, target_dte: int = 35) -> str:
     """
-    Return the expiry string (YYYY-MM-DD) whose DTE is closest to target_dte.
-    Fallback: today + target_dte days.
+    Return the most liquid real expiry between 14-45 DTE.
+    Among candidates, picks the one with highest total Open Interest.
+    Falls back to closest-to-target_dte if no 14-45 DTE expiries exist.
     """
     try:
-        expiries = yf.Ticker(ticker).options
+        stock    = yf.Ticker(ticker)
+        expiries = stock.options
         if not expiries:
             return (datetime.today() + timedelta(days=target_dte)).strftime("%Y-%m-%d")
+
         today = datetime.today().date()
-        best  = min(
-            expiries,
-            key=lambda e: abs(
-                (datetime.strptime(e, "%Y-%m-%d").date() - today).days - target_dte
-            ),
-        )
-        return best
+
+        # Collect all expiries in the 14–45 DTE window
+        candidates = []
+        for e in expiries:
+            exp_date = datetime.strptime(e, "%Y-%m-%d").date()
+            dte = (exp_date - today).days
+            if 14 <= dte <= 45:
+                candidates.append((e, dte))
+
+        if not candidates:
+            # Fall back: closest to target_dte across all expiries
+            return min(
+                expiries,
+                key=lambda e: abs(
+                    (datetime.strptime(e, "%Y-%m-%d").date() - today).days - target_dte
+                ),
+            )
+
+        if len(candidates) == 1:
+            return candidates[0][0]
+
+        # Check total OI on the top 3 nearest-to-30-DTE candidates
+        top3 = sorted(candidates, key=lambda x: abs(x[1] - 30))[:3]
+        best_expiry = top3[0][0]   # default = closest to 30 DTE
+        best_oi     = -1
+
+        for exp, _ in top3:
+            try:
+                chain    = stock.option_chain(exp)
+                total_oi = 0
+                if chain.puts is not None and not chain.puts.empty:
+                    total_oi += int(chain.puts["openInterest"].fillna(0).sum())
+                if chain.calls is not None and not chain.calls.empty:
+                    total_oi += int(chain.calls["openInterest"].fillna(0).sum())
+                if total_oi > best_oi:
+                    best_oi     = total_oi
+                    best_expiry = exp
+            except Exception:
+                continue
+
+        return best_expiry
+
     except Exception as e:
         logger.debug("get_nearest_expiry(%s) failed: %s", ticker, e)
         return (datetime.today() + timedelta(days=target_dte)).strftime("%Y-%m-%d")

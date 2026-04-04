@@ -271,8 +271,14 @@ class OptionsStrategyEngine:
 
     # ── Strategy builders ─────────────────────────────────────────────────────
 
-    def _build_iron_condor(self, ticker, price, iv_rank, dte) -> StrategySignal:
-        """Iron Condor — uses real market data when available, falls back to theoretical."""
+    def _build_iron_condor(
+        self, ticker, price, iv_rank, dte,
+        upper_bb: float = 0.0, lower_bb: float = 0.0,
+    ) -> StrategySignal:
+        """
+        Iron Condor — uses real market data when available, falls back to theoretical.
+        When upper_bb/lower_bb are provided, aligns short strikes with Bollinger Bands.
+        """
         from app.services.iv_calculator import get_real_spread_data, get_nearest_expiry
 
         real = get_real_spread_data(ticker, dte, "iron_condor")
@@ -289,10 +295,19 @@ class OptionsStrategyEngine:
             be_h     = real["be_high"]
             expiry   = real["expiry"]
             real_dte = real["dte"]
-            iv_note  = ""
+            iv_note  = " (BB)" if upper_bb > 0 else ""
         else:
-            sp = round(price * 0.925); lp = round(price * 0.875)
-            sc = round(price * 1.075); lc = round(price * 1.125)
+            # Use BB levels for short strikes when available
+            if upper_bb > 0 and lower_bb > 0:
+                sp = round(lower_bb * 0.99)   # just below lower BB
+                sc = round(upper_bb * 1.01)   # just above upper BB
+                lp = round(sp * 0.96)         # wing below short put
+                lc = round(sc * 1.04)         # wing above short call
+                iv_note = " (BB תיאורטי)"
+            else:
+                sp = round(price * 0.925); lp = round(price * 0.875)
+                sc = round(price * 1.075); lc = round(price * 1.125)
+                iv_note = " (תיאורטי)"
             wing   = sp - lp
             credit = round(wing * 0.40, 2)
             mp     = round(credit * 100, 2)
@@ -301,7 +316,6 @@ class OptionsStrategyEngine:
             be_h   = round(sc + credit, 2)
             expiry = get_nearest_expiry(ticker, dte)
             real_dte = dte
-            iv_note  = " (תיאורטי)"
 
         pz  = (be_h - be_l) / price * 100
         pop = min(75.0, 50 + pz * 1.2)

@@ -9,6 +9,7 @@ analyze_chart(ticker, hist) → dict with keys:
 import logging
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -204,6 +205,105 @@ _BEARISH_PATTERNS = {
 }
 
 
+# ── Bollinger Bands + ADX range-bound detector ───────────────────────────────
+
+def detect_range_bound_for_condor(df: pd.DataFrame) -> dict:
+    """
+    Use Bollinger Bands (20, 2), ADX (14), and RSI (14) to identify sideways markets
+    suitable for Iron Condor strategies.
+
+    Returns dict with:
+        is_sideways  : bool
+        upper_bb     : float
+        lower_bb     : float
+        sma          : float
+        bandwidth    : float  — (upper - lower) / sma
+        adx          : float
+        rsi          : float
+    """
+    result = {
+        "is_sideways": False,
+        "upper_bb": 0.0, "lower_bb": 0.0, "sma": 0.0,
+        "bandwidth": 0.0, "adx": 50.0, "rsi": 50.0,
+    }
+
+    if df is None or df.empty or len(df) < 30:
+        return result
+
+    try:
+        close = df["Close"].dropna()
+        high  = df["High"].dropna()  if "High" in df.columns else close
+        low   = df["Low"].dropna()   if "Low"  in df.columns else close
+
+        if len(close) < 20:
+            return result
+
+        # ── Bollinger Bands (20, 2) ────────────────────────────────────────
+        sma  = float(close.rolling(20).mean().iloc[-1])
+        std  = float(close.rolling(20).std().iloc[-1])
+        upper_bb = sma + 2 * std
+        lower_bb = sma - 2 * std
+        bandwidth = (upper_bb - lower_bb) / sma if sma > 0 else 1.0
+
+        # ── RSI (14) ───────────────────────────────────────────────────────
+        delta = close.diff()
+        gain  = delta.clip(lower=0).rolling(14).mean()
+        loss  = (-delta.clip(upper=0)).rolling(14).mean()
+        rs    = gain / loss.replace(0, np.nan)
+        rsi   = float((100 - 100 / (1 + rs)).iloc[-1])
+
+        # ── ADX (14) — Wilder method ───────────────────────────────────────
+        N = 14
+        if len(high) >= N * 2 and len(low) >= N * 2:
+            prev_close = close.shift(1)
+            tr = pd.concat([
+                high - low,
+                (high - prev_close).abs(),
+                (low  - prev_close).abs(),
+            ], axis=1).max(axis=1)
+
+            up_move   = high.diff()
+            down_move = (-low.diff())
+
+            plus_dm  = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+            minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
+
+            alpha    = 1.0 / N
+            atr      = tr.ewm(alpha=alpha, min_periods=N, adjust=False).mean()
+            plus_di  = 100 * plus_dm.ewm(alpha=alpha, min_periods=N, adjust=False).mean() / atr.replace(0, np.nan)
+            minus_di = 100 * minus_dm.ewm(alpha=alpha, min_periods=N, adjust=False).mean() / atr.replace(0, np.nan)
+
+            di_sum   = (plus_di + minus_di).replace(0, np.nan)
+            dx       = 100 * (plus_di - minus_di).abs() / di_sum
+            adx      = float(dx.ewm(alpha=alpha, min_periods=N, adjust=False).mean().iloc[-1])
+        else:
+            adx = 50.0
+
+        # ── Sideways conditions ────────────────────────────────────────────
+        price = float(close.iloc[-1])
+        is_sideways = (
+            adx < 25                          # weak trend
+            and 40 <= rsi <= 60               # neutral momentum
+            and lower_bb <= price <= upper_bb # price inside bands
+            and bandwidth < 0.15              # narrow bands (squeeze)
+        )
+
+        result.update({
+            "is_sideways": is_sideways,
+            "upper_bb":    round(upper_bb, 2),
+            "lower_bb":    round(lower_bb, 2),
+            "sma":         round(sma, 2),
+            "bandwidth":   round(bandwidth, 4),
+            "adx":         round(adx, 1),
+            "rsi":         round(rsi, 1),
+        })
+
+    except Exception as e:
+        logger.debug("detect_range_bound_for_condor failed: %s", e)
+
+    return result
+
+
 # ── main entry point ──────────────────────────────────────────────────────────
 
 def analyze_chart(ticker: str, hist: pd.DataFrame) -> dict:
@@ -220,7 +320,11 @@ def analyze_chart(ticker: str, hist: pd.DataFrame) -> dict:
         trend_override : "bullish" | "bearish" | None
         summary        : str   (Telegram-ready, Hebrew)
     """
-    result: dict = {"patterns": [], "trend_override": None, "summary": ""}
+    result: dict = {
+        "patterns": [], "trend_override": None, "summary": "",
+        "is_sideways": False, "upper_bb": 0.0, "lower_bb": 0.0,
+        "adx": 50.0, "rsi": 50.0,
+    }
 
     if hist is None or hist.empty or "Close" not in hist.columns:
         result["summary"] = "⚠️ אין נתוני גרף"
@@ -259,7 +363,33 @@ def analyze_chart(ticker: str, hist: pd.DataFrame) -> dict:
     elif bear_hits == 1 and bull_hits == 0:
         result["trend_override"] = "bearish"
 
-    if patterns:
+    # ── BB/ADX sideways detection ─────────────────────────────────────────
+    try:
+        bb_data = detect_range_bound_for_condor(hist)
+        result.update({
+            "is_sideways": bb_data["is_sideways"],
+            "upper_bb":    bb_data["upper_bb"],
+            "lower_bb":    bb_data["lower_bb"],
+            "adx":         bb_data["adx"],
+            "rsi":         bb_data["rsi"],
+        })
+        if bb_data["is_sideways"]:
+            # Sideways overrides pattern-based trend
+            result["trend_override"] = "neutral"
+    except Exception:
+        pass
+
+    # ── Summary ───────────────────────────────────────────────────────────
+    if result["is_sideways"]:
+        adx_val = result["adx"]
+        rsi_val = result["rsi"]
+        bw_pct  = round(result.get("bandwidth", 0) * 100 if "bandwidth" in result else 0, 1)
+        sideways_note = f"📊 *שוק דשדוש* (ADX: {adx_val:.0f}, RSI: {rsi_val:.0f}, BB-Bandwidth: {bw_pct:.1f}%) — מועמד ל-Iron Condor"
+        if patterns:
+            result["summary"] = sideways_note + " | " + " | ".join(patterns)
+        else:
+            result["summary"] = sideways_note
+    elif patterns:
         result["summary"] = "📐 *תבניות גרף:* " + " | ".join(patterns)
     else:
         result["summary"] = "📐 *תבניות גרף:* לא זוהו תבניות ברורות"

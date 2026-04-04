@@ -458,12 +458,16 @@ def _run_strategies_sync(args: list) -> list[str]:
         tv_tickers:   list[str] = []
 
         try:
-            bull_tickers = FinvizService.get_bullish_tickers(n=12) or []
+            import random
+            raw_bull = FinvizService.get_bullish_tickers(n=20) or []
+            bull_tickers = random.sample(raw_bull, min(12, len(raw_bull)))
         except Exception as e:
             logger.warning("Finviz bullish failed: %s", e)
 
         try:
-            bear_tickers = FinvizService.get_bearish_tickers(n=6) or []
+            import random
+            raw_bear = FinvizService.get_bearish_tickers(n=10) or []
+            bear_tickers = random.sample(raw_bear, min(6, len(raw_bear)))
         except Exception as e:
             logger.warning("Finviz bearish failed: %s", e)
 
@@ -553,24 +557,48 @@ def _run_strategies_sync(args: list) -> list[str]:
             except Exception:
                 pass
 
-            # ── Try to find a signal — attempt multiple trend values ──────
+            # ── Analyze chart — BB/ADX + patterns ────────────────────────
             signal = None
             trend  = base_trend
+            chart  = {}
 
-            # First try the Finviz-derived trend (with chart pattern override)
             try:
                 from app.ta.chart_patterns import analyze_chart
-                chart = analyze_chart(ticker, stock.history(period="3mo"))
-                if chart.get("trend_override") and not skip_cooldown:
+                hist_3mo = stock.history(period="3mo")
+                chart    = analyze_chart(ticker, hist_3mo)
+
+                # If BB/ADX says sideways → force neutral (Iron Condor territory)
+                if chart.get("is_sideways") and not skip_cooldown:
+                    trend = "neutral"
+                elif chart.get("trend_override") and not skip_cooldown:
                     trend = chart["trend_override"]
             except Exception:
                 chart = {}
 
-            signal = engine.select_strategy(
-                ticker=ticker, price=price, trend=trend,  # type: ignore[arg-type]
-                iv_rank=iv_rank, rsi=rsi_val, vix_level=vix,
-                has_earnings_soon=earnings, dte_preference=35,
-            )
+            # Extract BB levels for Iron Condor alignment
+            upper_bb = chart.get("upper_bb", 0.0) or 0.0
+            lower_bb = chart.get("lower_bb", 0.0) or 0.0
+
+            # ── Build signal ──────────────────────────────────────────────
+            # If sideways detected, build BB-aligned Iron Condor directly
+            if chart.get("is_sideways") and not skip_cooldown and iv_rank >= 30:
+                signal = engine._build_iron_condor(
+                    ticker, price, iv_rank, 35,
+                    upper_bb=upper_bb, lower_bb=lower_bb,
+                )
+                adx_val = chart.get("adx", 0)
+                rsi_bb  = chart.get("rsi", 0)
+                signal.rationale = (
+                    f"שוק דשדוש מובהק (ADX: {adx_val:.0f}, RSI: {rsi_bb:.0f}) — "
+                    f"IC מותאם לרצועות בולינגר ({lower_bb:.1f}–{upper_bb:.1f})"
+                )
+                signal = engine._apply_margin(signal)
+            else:
+                signal = engine.select_strategy(
+                    ticker=ticker, price=price, trend=trend,  # type: ignore[arg-type]
+                    iv_rank=iv_rank, rsi=rsi_val, vix_level=vix,
+                    has_earnings_soon=earnings, dte_preference=35,
+                )
 
             # If no signal, try trend fallbacks
             if not signal:
@@ -590,15 +618,35 @@ def _run_strategies_sync(args: list) -> list[str]:
             # Last resort: force a strategy based on IV level
             if not signal:
                 if iv_rank >= 30:
-                    signal = engine._build_iron_condor(ticker, price, iv_rank, 35)
+                    signal = engine._build_iron_condor(
+                        ticker, price, iv_rank, 35,
+                        upper_bb=upper_bb, lower_bb=lower_bb,
+                    )
                     signal.rationale = "איתות ברירת מחדל — IV בינוני, שוק ניטרלי"
                 else:
                     signal = engine._build_bull_call_spread(ticker, price, iv_rank, 35)
                     signal.rationale = "IV נמוך — ספרד קנייה בדביט"
                 signal = engine._apply_margin(signal)
 
+            # ── STRICT LIQUIDITY KILL SWITCH ─────────────────────────────
+            # Skip tickers with no real option market (volume < 10 OR OI < 50)
+            if signal and signal.net_credit > 0:
+                try:
+                    from app.services.iv_calculator import get_real_option_data
+                    liq = get_real_option_data(ticker, signal.dte, option_type="put")
+                    vol = liq.get("volume", 0)
+                    oi  = liq.get("open_interest", 0)
+                    if vol < 10 or oi < 50:
+                        logger.info(
+                            "strategies: %s killed — low liquidity vol=%d OI=%d",
+                            ticker, vol, oi,
+                        )
+                        continue
+                except Exception:
+                    pass  # if we can't check, let it through
+
             if signal:
-                # ── Per-ticker context: news + chart + liquidity ──────────
+                # ── Per-ticker context: news + chart ─────────────────────
                 context_lines = []
 
                 # 1. Recent news headline
@@ -612,30 +660,18 @@ def _run_strategies_sync(args: list) -> list[str]:
                 except Exception:
                     pass
 
-                # 2. Chart pattern summary
-                try:
-                    chart_hist = stock.history(period="3mo")
-                    if not chart_hist.empty and len(chart_hist) >= 20:
-                        from app.ta.chart_patterns import analyze_chart
-                        chart_info = analyze_chart(ticker, chart_hist)
-                        if chart_info.get("summary"):
-                            context_lines.append(f"📊 {chart_info['summary']}")
-                        if chart_info.get("patterns"):
-                            context_lines.append(f"   תבנית: {chart_info['patterns'][0]}")
-                except Exception:
-                    pass
+                # 2. Chart summary (reuse already-fetched chart data)
+                if chart.get("summary"):
+                    context_lines.append(f"📊 {chart['summary']}")
 
-                # 3. Liquidity check on real option data
+                # 3. Liquidity confirmation (already passed kill switch above)
                 try:
                     from app.services.iv_calculator import get_real_option_data
                     if signal.net_credit > 0:
                         liq = get_real_option_data(ticker, signal.dte, option_type="put")
                         vol = liq.get("volume", 0)
                         oi  = liq.get("open_interest", 0)
-                        if vol < 10 or oi < 100:
-                            context_lines.append(f"⚠️ נזילות נמוכה: volume={vol}, OI={oi}")
-                        else:
-                            context_lines.append(f"✅ נזילות: volume={vol}, OI={oi}")
+                        context_lines.append(f"✅ נזילות: volume={vol}, OI={oi}")
                 except Exception:
                     pass
 
