@@ -652,40 +652,49 @@ def _run_strategies_sync(args: list) -> list[str]:
                     pass  # if we can't check, let it through
 
             if signal:
-                # ── Per-ticker context: news + chart ─────────────────────
-                context_lines = []
+                # ── Per-ticker context: FinViz fundamentals + chart ───────
+                from app.services.finviz_service import (
+                    get_stock_context, format_context_block,
+                )
+                fvz_ctx = get_stock_context(ticker)
 
-                # 1. Recent news headline
-                try:
-                    from app.services.news_scraper import NewsScraper
-                    scraper  = NewsScraper()
-                    raw_news = scraper.get_stock_news(ticker, limit=3)
-                    if raw_news:
-                        top = raw_news[0].get("headline", "")[:100]
-                        context_lines.append(f"📰 חדשות: _{top}_")
-                except Exception:
-                    pass
+                # Chart summary (already-fetched)
+                chart_line = f"📊 {chart['summary']}" if chart.get("summary") else ""
 
-                # 2. Chart summary (reuse already-fetched chart data)
-                if chart.get("summary"):
-                    context_lines.append(f"📊 {chart['summary']}")
-
-                # 3. Liquidity confirmation (already passed kill switch above)
+                # Liquidity confirmation (already passed kill switch above)
+                liq_line = ""
                 try:
                     from app.services.iv_calculator import get_real_option_data
                     if signal.net_credit > 0:
                         liq = get_real_option_data(ticker, signal.dte, option_type="put")
                         vol = liq.get("volume", 0)
                         oi  = liq.get("open_interest", 0)
-                        context_lines.append(f"✅ נזילות: volume={vol}, OI={oi}")
+                        liq_line = f"✅ נזילות: volume={vol}, OI={oi}"
                 except Exception:
                     pass
 
-                context_block = "\n".join(context_lines)
-                signal.telegram_message = (
-                    engine.format_telegram_message(signal)
-                    + (f"\n\n{context_block}" if context_block else "")
-                )
+                fvz_block = format_context_block(fvz_ctx)
+
+                # Toxic-stock warning: insider dumping + negative GEX
+                toxic_warning = ""
+                if fvz_ctx.get("massive_selling"):
+                    toxic_warning = (
+                        "\n\n\u26a0\ufe0f *אזהרה קריטית:* "
+                        "פנים מוכרים בכמות חריגה! "
+                        "מכירת פרמיה על מניה זו מסוכנת במיוחד."
+                    )
+
+                parts = [engine.format_telegram_message(signal)]
+                if chart_line:
+                    parts.append(chart_line)
+                if liq_line:
+                    parts.append(liq_line)
+                if fvz_block:
+                    parts.append(fvz_block)
+                if toxic_warning:
+                    parts.append(toxic_warning)
+
+                signal.telegram_message = "\n\n".join(parts)
                 messages.append(signal.telegram_message)
 
                 # Save to MongoDB + training
@@ -1151,6 +1160,21 @@ def _sync_analyze_ticker(ticker: str) -> str:
 
     chart_block = f"\n{chart_summary}\n" if chart_summary else ""
 
+    # ── FinViz fundamentals / news / insider ──────────────────────────────
+    from app.services.finviz_service import get_stock_context, format_context_block
+    fvz_ctx   = get_stock_context(ticker)
+    fvz_block = format_context_block(fvz_ctx)
+    fvz_section = f"\n{fvz_block}\n" if fvz_block else ""
+
+    # Toxic warning: insider mass-selling
+    toxic_warning = ""
+    if fvz_ctx.get("massive_selling"):
+        toxic_warning = (
+            "\n\u26a0\ufe0f *אזהרה קריטית:* "
+            "פנים מוכרים בכמות חריגה! "
+            "מכירת פרמיה מסוכנת במיוחד עכשיו.\n"
+        )
+
     if best:
         margin_line = ""
         if best.margin_required > 0:
@@ -1158,7 +1182,14 @@ def _sync_analyze_ticker(ticker: str) -> str:
                 f"\n💼 *הון נדרש:* `${best.margin_required:.0f}` | "
                 f"ROC: `{best.return_on_capital:.1f}%` {best.capital_efficiency}\n"
             )
-        return header + chart_block + margin_line + engine.format_telegram_message(best)
+        return (
+            header
+            + chart_block
+            + fvz_section
+            + toxic_warning
+            + margin_line
+            + engine.format_telegram_message(best)
+        )
 
     iv_env = (
         "גבוה — שקול מכירת פרמיה" if iv_rank > 50
@@ -1167,6 +1198,8 @@ def _sync_analyze_ticker(ticker: str) -> str:
     return (
         header
         + chart_block
+        + fvz_section
+        + toxic_warning
         + f"💡 סביבת IV: *{iv_env}*\n"
         + "⚠️ אין איתות אסטרטגיה ברור בתנאים הנוכחיים.\n"
         + "בדוק שוב כשה-IVR יעלה מעל 30 או יירד מתחת ל-25."
