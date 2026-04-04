@@ -595,6 +595,7 @@ def _run_strategies_sync(args: list) -> list[str]:
                 else:
                     signal = engine._build_bull_call_spread(ticker, price, iv_rank, 35)
                     signal.rationale = "IV נמוך — ספרד קנייה בדביט"
+                signal = engine._apply_margin(signal)
 
             if signal:
                 # ── Per-ticker context: news + chart + liquidity ──────────
@@ -1109,7 +1110,13 @@ def _sync_analyze_ticker(ticker: str) -> str:
     chart_block = f"\n{chart_summary}\n" if chart_summary else ""
 
     if best:
-        return header + chart_block + engine.format_telegram_message(best)
+        margin_line = ""
+        if best.margin_required > 0:
+            margin_line = (
+                f"\n💼 *הון נדרש:* `${best.margin_required:.0f}` | "
+                f"ROC: `{best.return_on_capital:.1f}%` {best.capital_efficiency}\n"
+            )
+        return header + chart_block + margin_line + engine.format_telegram_message(best)
 
     iv_env = (
         "גבוה — שקול מכירת פרמיה" if iv_rank > 50

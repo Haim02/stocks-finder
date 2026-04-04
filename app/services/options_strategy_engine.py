@@ -103,6 +103,11 @@ class StrategySignal(BaseModel):
     is_broken_wing: bool  = False
     skip_width:     float = 0.0  # extra distance on the far wing
 
+    # ── Capital efficiency ────────────────────────────────────────────────────
+    margin_required:   float = 0.0
+    capital_efficiency: str  = ""   # e.g. "🟢 מצוין"
+    margin_note:       str   = ""   # human-readable explanation
+
     # ── Context ───────────────────────────────────────────────────────────────
     rationale:        str = ""
     market_condition: str = ""
@@ -115,6 +120,21 @@ class StrategySignal(BaseModel):
 
 class OptionsStrategyEngine:
     """Select the best options strategy per ticker; format Telegram messages."""
+
+    # ── Margin helper ────────────────────────────────────────────────────────
+
+    def _apply_margin(self, signal: StrategySignal) -> StrategySignal:
+        """Enrich signal with margin_required, return_on_capital, and capital_efficiency."""
+        from app.services.margin_calculator import calculate_margin
+        try:
+            result = calculate_margin(signal)
+            signal.margin_required    = result["margin"]
+            signal.return_on_capital  = result["roc"]
+            signal.capital_efficiency = result["label"]
+            signal.margin_note        = result["note"]
+        except Exception as e:
+            logger.debug("_apply_margin failed for %s: %s", signal.ticker, e)
+        return signal
 
     # ── Public: strategy selector ────────────────────────────────────────────
 
@@ -150,76 +170,76 @@ class OptionsStrategyEngine:
         if has_earnings_soon and iv_rank > 50:
             s = self._build_long_straddle(**kw)
             s.rationale = "עסקת דוחות — צפויה תנועה חדה, כיוון לא ידוע"
-            return s
+            return self._apply_margin(s)
 
         if iv_rank >= 35 and trend == "neutral":
             s = self._build_iron_condor(**kw)
             s.rationale = "IVR גבוה + שוק ניטרלי — גביית פרמיה משני הצדדים (אזור רווח 10-15%)"
-            return s
+            return self._apply_margin(s)
 
         if iv_rank > 30 and trend in ("neutral", "bearish", "strong_bearish") and rsi > 65:
             s = self._build_bear_call_spread(**kw)
             s.rationale = "IVR גבוה + RSI קניית יתר (>65) — מכירת Call Spread מעל התנגדות, ~0.20 דלתא"
-            return s
+            return self._apply_margin(s)
 
         # Butterfly: high precision pin at expiry (more specific than bull_put_spread)
         if iv_rank > 40 and trend == "neutral" and 44 <= rsi <= 56 and dte_preference <= 21:
             s = self._build_butterfly(ticker, price, iv_rank, dte_preference)
             s.rationale = "מניה תקועה + IV גבוה + קרוב לפקיעה — דיוק מקסימלי ב-Butterfly"
-            return s
+            return self._apply_margin(s)
 
         # Broken-Wing Butterfly: medium IV + bullish/neutral + medium DTE
         if 30 <= iv_rank <= 55 and trend in ("bullish", "neutral") and 21 <= dte_preference <= 45:
             s = self._build_broken_wing_butterfly(ticker, price, iv_rank, dte_preference)
             s.rationale = "IV בינוני + נטייה שורית — מבנה א-סימטרי עם קרדיט נטו"
-            return s
+            return self._apply_margin(s)
 
         if iv_rank >= 25 and trend in ("bullish", "neutral") and rsi < 60:
             s = self._build_bull_put_spread(**kw)
             s.rationale = "IVR > 25 + נטייה שורית + RSI < 60 — קרדיט מתחת לתמיכה, ~0.20 דלתא, PoP 68%"
-            return s
+            return self._apply_margin(s)
 
         if iv_rank > 50 and trend in ("bullish", "strong_bullish") and rsi < 35:
             s = self._build_cash_secured_put(**kw)
             s.rationale = "IVR גבוה + מכירת יתר (RSI < 35) + שורי — להיכנס לירידה תוך גביית פרמיה, 30-45 DTE"
-            return s
+            return self._apply_margin(s)
 
         if owns_shares and iv_rank > 30 and rsi > 60:
             s = self._build_covered_call(**kw)
             s.rationale = "מחזיק מניות + IVR מוגבר + ליד התנגדות — יצירת הכנסה חודשית שוטפת"
-            return s
+            return self._apply_margin(s)
 
         if vix_level > 25 and iv_rank > 60 and ticker in INDEX_ETFS:
             s = self._build_short_strangle(**kw)
             s.rationale = "זינוק VIX + ETF מדד — מכירת פרמיית תנודתיות גבוהה (סיכון בלתי מוגבל, השתמש בסטופים)"
-            return s
+            return self._apply_margin(s)
 
         # Call Back Ratio: strong bullish + low IV + expecting big explosive move up
         if iv_rank < 25 and trend == "strong_bullish" and 30 <= dte_preference <= 60:
             s = self._build_call_back_ratio(ticker, price, iv_rank, dte_preference)
             s.rationale = "IV נמוך + זינוק שורי חזק צפוי — חשיפה בלתי מוגבלת בעלות אפס"
-            return s
+            return self._apply_margin(s)
 
         if iv_rank < 25 and trend in ("bullish", "strong_bullish"):
             s = self._build_bull_call_spread(**kw)
             s.rationale = "IVR נמוך + שורי — ספרד דביט זול, סיכון מוגדר, משחק כיווני"
-            return s
+            return self._apply_margin(s)
 
         if iv_rank < 25 and trend == "strong_bullish" and dte_preference > 60:
             s = self._build_long_call_leap(**kw)
             s.rationale = "IVR נמוך + מגמה שורית חזקה — קולים זולים לטווח ארוך כתחליף מניה"
-            return s
+            return self._apply_margin(s)
 
         if iv_rank < 25 and trend in ("bearish", "strong_bearish"):
             s = self._build_bear_put_spread(**kw)
             s.rationale = "IVR נמוך + דובי — Put ספרד בדביט, סיכון מוגדר, משחק כיווני"
-            return s
+            return self._apply_margin(s)
 
         # Calendar Spread: low IV + truly neutral + enough time
         if iv_rank < 30 and trend == "neutral" and dte_preference >= 45:
             s = self._build_calendar_spread(ticker, price, iv_rank, dte_preference)
             s.rationale = "IV נמוך + מניה תקועה — מרוויחים מהבדל שחיקת הזמן בין פקיעות"
-            return s
+            return self._apply_margin(s)
 
         return None
 
@@ -828,6 +848,17 @@ class OptionsStrategyEngine:
         vega_str       = f"${s.vega_per_1pct:+.2f}/1%" if s.vega_per_1pct else "—"
         cat_emoji      = "🟢" if s.category == "BULLISH" else ("🔴" if s.category == "BEARISH" else "⚪")
 
+        # Capital efficiency block
+        margin_block = ""
+        if s.margin_required > 0:
+            roc_str    = f"`{s.return_on_capital:.1f}%`" if s.return_on_capital else "—"
+            eff_str    = s.capital_efficiency or "—"
+            note_str   = f"\n  _{s.margin_note}_" if s.margin_note else ""
+            margin_block = (
+                f"\n💼 *הון נדרש לעסקה:*\n"
+                f"  בטוחה: `${s.margin_required:.0f}` | תשואה על הון: {roc_str} {eff_str}{note_str}\n"
+            )
+
         return (
             f"{cat_emoji} *{s.ticker}* — {s.strategy_display}\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -845,6 +876,7 @@ class OptionsStrategyEngine:
             f"\n*ניהול העסקה:*\n"
             f"  סגור ב-50% רווח → `${s.close_target_dollar:.0f}`\n"
             f"  נהל / Roll ב-`{s.manage_at_dte}` DTE\n"
+            + margin_block
             + (f"\n📰 *חדשות:* _{s.news_pulse}_\n" if s.news_pulse else "")
             + f"\n_{s.rationale}_"
         )
