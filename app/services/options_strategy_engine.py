@@ -149,9 +149,14 @@ class OptionsStrategyEngine:
         has_earnings_soon: bool = False,
         dte_preference:   int  = 35,
         owns_shares:      bool = False,
+        gex_regime:       str  = "unknown",
     ) -> Optional[StrategySignal]:
         """
         Return the optimal StrategySignal, or None if no edge is detected.
+
+        gex_regime: optional pre-computed GEX regime ("positive" | "negative" |
+                    "transitional" | "unknown"). When "negative", premium-selling
+                    strategies are skipped — the market is in vol-expansion mode.
 
         Priority order (top wins):
           1. Earnings straddle
@@ -161,23 +166,24 @@ class OptionsStrategyEngine:
           5. Cash-Secured Put (oversold + high IV)
           6. Covered Call (own shares)
           7. Short Strangle (index ETF + VIX spike)
-          8. Bull Call Spread (low IV + bullish)
+          8. Bull Call Spread (low IV + bullish)  ← NOT blocked by negative GEX
           9. Long Call LEAP (low IV + strong bullish + long DTE)
          10. Bear Put Spread (low IV + bearish)
         """
         kw = dict(ticker=ticker, price=price, iv_rank=iv_rank, dte=dte_preference)
+        neg_gex = (gex_regime == "negative")   # block premium selling if True
 
         if has_earnings_soon and iv_rank > 50:
             s = self._build_long_straddle(**kw)
             s.rationale = "עסקת דוחות — צפויה תנועה חדה, כיוון לא ידוע"
             return self._apply_margin(s)
 
-        if iv_rank >= 35 and trend == "neutral":
+        if iv_rank >= 35 and trend == "neutral" and not neg_gex:
             s = self._build_iron_condor(**kw)
             s.rationale = "IVR גבוה + שוק ניטרלי — גביית פרמיה משני הצדדים (אזור רווח 10-15%)"
             return self._apply_margin(s)
 
-        if iv_rank > 30 and trend in ("neutral", "bearish", "strong_bearish") and rsi > 65:
+        if iv_rank > 30 and trend in ("neutral", "bearish", "strong_bearish") and rsi > 65 and not neg_gex:
             s = self._build_bear_call_spread(**kw)
             s.rationale = "IVR גבוה + RSI קניית יתר (>65) — מכירת Call Spread מעל התנגדות, ~0.20 דלתא"
             return self._apply_margin(s)
@@ -194,22 +200,22 @@ class OptionsStrategyEngine:
             s.rationale = "IV בינוני + נטייה שורית — מבנה א-סימטרי עם קרדיט נטו"
             return self._apply_margin(s)
 
-        if iv_rank >= 25 and trend in ("bullish", "neutral") and rsi < 60:
+        if iv_rank >= 25 and trend in ("bullish", "neutral") and rsi < 60 and not neg_gex:
             s = self._build_bull_put_spread(**kw)
             s.rationale = "IVR > 25 + נטייה שורית + RSI < 60 — קרדיט מתחת לתמיכה, ~0.20 דלתא, PoP 68%"
             return self._apply_margin(s)
 
-        if iv_rank > 50 and trend in ("bullish", "strong_bullish") and rsi < 35:
+        if iv_rank > 50 and trend in ("bullish", "strong_bullish") and rsi < 35 and not neg_gex:
             s = self._build_cash_secured_put(**kw)
             s.rationale = "IVR גבוה + מכירת יתר (RSI < 35) + שורי — להיכנס לירידה תוך גביית פרמיה, 30-45 DTE"
             return self._apply_margin(s)
 
-        if owns_shares and iv_rank > 30 and rsi > 60:
+        if owns_shares and iv_rank > 30 and rsi > 60 and not neg_gex:
             s = self._build_covered_call(**kw)
             s.rationale = "מחזיק מניות + IVR מוגבר + ליד התנגדות — יצירת הכנסה חודשית שוטפת"
             return self._apply_margin(s)
 
-        if vix_level > 25 and iv_rank > 60 and ticker in INDEX_ETFS:
+        if vix_level > 25 and iv_rank > 60 and ticker in INDEX_ETFS and not neg_gex:
             s = self._build_short_strangle(**kw)
             s.rationale = "זינוק VIX + ETF מדד — מכירת פרמיית תנודתיות גבוהה (סיכון בלתי מוגבל, השתמש בסטופים)"
             return self._apply_margin(s)

@@ -33,12 +33,18 @@ from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CommandHandler,
+    ConversationHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
 )
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# ── Conversation states ───────────────────────────────────────────────────────
+GEX_WAITING_TICKER = 1   # /gex: waiting for user to type ticker name
 
 # ── Module-level app reference so notify_trade() can reach it ─────────────
 _app: Application | None = None
@@ -1167,6 +1173,110 @@ def _sync_analyze_ticker(ticker: str) -> str:
     )
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# /gex — Gamma Exposure conversational handler
+# ══════════════════════════════════════════════════════════════════════════════
+
+_GEX_TICKER_MAP = {
+    "SPX": "SPY", "^SPX": "SPY", "^GSPC": "SPY",
+    "NDX": "QQQ", "^NDX": "QQQ", "NQ": "QQQ",
+    "RUT": "IWM", "^RUT": "IWM",
+    "DJI": "DIA", "^DJI": "DIA",
+    "VIX": "^VIX",
+}
+
+
+async def cmd_gex_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    /gex — entry point. Asks user which ticker to analyze.
+    Returns GEX_WAITING_TICKER state to wait for a reply.
+    """
+    if not _is_authorized(update):
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        "🎯 *ניתוח Gamma Exposure \\(GEX\\)*\n\n"
+        "איזה טיקר תרצה לנתח?\n\n"
+        "💡 *דוגמאות:*\n"
+        "   SPY — מדד S&P 500\n"
+        "   QQQ — מדד נאסד״ק\n"
+        "   AAPL / NVDA / TSLA\n\n"
+        "✍️ הקלד את שם הטיקר:",
+        parse_mode="MarkdownV2",
+    )
+    return GEX_WAITING_TICKER
+
+
+async def cmd_gex_receive_ticker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Receives the ticker, runs GEX analysis, sends result.
+    Returns ConversationHandler.END.
+    """
+    user_input = update.message.text.strip().upper()
+
+    if not user_input or len(user_input) > 10 or not user_input.replace("^", "").isalpha():
+        await update.message.reply_text(
+            "⚠️ טיקר לא תקין. נסה שוב עם /gex\nדוגמאות: SPY, QQQ, AAPL, NVDA"
+        )
+        return ConversationHandler.END
+
+    ticker = _GEX_TICKER_MAP.get(user_input, user_input)
+
+    await update.message.reply_text(
+        f"⏳ מחשב GEX עבור *{ticker}*...\n"
+        f"_סורק את כל שרשרת האופציות עד 45 ימים — עשוי לקחת 30-60 שניות_",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+    try:
+        result_msg = await asyncio.to_thread(_run_gex_sync, ticker, 45)
+
+        if len(result_msg) <= 4000:
+            try:
+                await update.message.reply_text(result_msg, parse_mode=ParseMode.MARKDOWN)
+            except Exception:
+                await update.message.reply_text(result_msg)
+        else:
+            # Split at the ASCII chart block
+            chart_start = result_msg.find("```")
+            if chart_start > 0:
+                main_part  = result_msg[:chart_start].strip()
+                chart_part = result_msg[chart_start:].strip()
+                try:
+                    await update.message.reply_text(main_part,  parse_mode=ParseMode.MARKDOWN)
+                    await update.message.reply_text(chart_part, parse_mode=ParseMode.MARKDOWN)
+                except Exception:
+                    await update.message.reply_text(main_part)
+                    await update.message.reply_text(chart_part)
+            else:
+                await update.message.reply_text(result_msg[:3800])
+                if len(result_msg) > 3800:
+                    await update.message.reply_text(result_msg[3800:])
+
+        await update.message.reply_text("🔄 רוצה לנתח טיקר נוסף? הקלד /gex שוב.")
+
+    except Exception as e:
+        logger.exception("cmd_gex_receive_ticker failed for %s", ticker)
+        await update.message.reply_text(
+            f"❌ שגיאה בניתוח {ticker}: {e}\nודא שהטיקר תקין ונסה שוב עם /gex"
+        )
+
+    return ConversationHandler.END
+
+
+async def cmd_gex_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Allow user to cancel mid-conversation with /cancel."""
+    await update.message.reply_text("❌ ניתוח GEX בוטל.")
+    return ConversationHandler.END
+
+
+def _run_gex_sync(ticker: str, max_dte: int) -> str:
+    """Synchronous wrapper for GEX calculation (runs in thread)."""
+    from app.services.gex_analyzer import calculate_gex, format_gex_telegram
+    result = calculate_gex(ticker, max_dte=max_dte)
+    return format_gex_telegram(result)
+
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show all available bot commands."""
     if not _is_authorized(update):
@@ -1186,7 +1296,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/strategies AAPL TSLA — ניתוח מניות ספציפיות\n"
         "/analyze טיקר — ניתוח מעמיק: IV + אסטרטגיה + ML\n"
         "/trade\\_check טיקר — המלצת Wheel/Spread מפורטת\n"
-        "/quick\\_scan — רשימה קומפקטית: מניה | אסטרטגיה | סיכוי | הכנסה\n\n"
+        "/quick\\_scan — רשימה קומפקטית: מניה | אסטרטגיה | סיכוי | הכנסה\n"
+        "/gex — מפת GEX אינטראקטיבי (הבוט ישאל איזה טיקר)\n\n"
         "🔬 *מחקר:*\n"
         "/deepdive טיקר — ניתוח עמוק + דוח במייל\n\n"
         "🤖 *מודל ML:*\n"
@@ -1303,6 +1414,24 @@ def build_app() -> Application:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set in .env")
 
     app = Application.builder().token(token).build()
+
+    # ── GEX conversational handler — must be registered FIRST ────────────────
+    gex_conv = ConversationHandler(
+        entry_points=[CommandHandler("gex", cmd_gex_start)],
+        states={
+            GEX_WAITING_TICKER: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    cmd_gex_receive_ticker,
+                )
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cmd_gex_cancel)],
+        conversation_timeout=120,
+        name="gex_conversation",
+    )
+    app.add_handler(gex_conv)
+
     # ── Core ──────────────────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",        cmd_start))
     app.add_handler(CommandHandler("help",         cmd_help))
