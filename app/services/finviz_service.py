@@ -29,67 +29,69 @@ BEARISH_URL = (
 class FinvizService:
     """Momentum scans used to seed the options pipeline."""
 
-    @staticmethod
-    def _screener_via_overview(filters_dict: dict, n: int) -> list[str]:
-        """Try finvizfinance Overview API; returns [] on any failure."""
-        from finvizfinance.screener.overview import Overview
-        ov = Overview()
-        ov.set_filter(filters_dict=filters_dict)
-        df = ov.screener_view()
-        if df is None or df.empty:
-            return []
-        col = next((c for c in ("Ticker", "ticker", "Symbol") if c in df.columns), None)
-        if not col:
-            return []
-        return [str(t).upper() for t in df[col].dropna().tolist()[:n]]
+    # Volume-sorted URLs — sort by -volume so results are NOT alphabetical
+    _BULLISH_VOL_URL = (
+        "https://finviz.com/screener.ashx?v=111&ft=4"
+        "&f=sh_avgvol_o500,sh_price_o5,ta_rsi_nos50,ta_sma20_pa,ta_sma50_pa"
+        "&o=-volume"
+    )
+    _BEARISH_VOL_URL = (
+        "https://finviz.com/screener.ashx?v=111&ft=4"
+        "&f=sh_avgvol_o500,sh_price_o5,ta_rsi_ob60,ta_sma20_pb,ta_sma50_pb"
+        "&o=-volume"
+    )
 
     @staticmethod
-    def get_bullish_tickers(n: int = 20) -> list[str]:
-        """Returns up to `n` bullish momentum tickers from Finviz."""
-        logger.info("Finviz bullish scan (target=%d)...", n)
-        try:
-            tickers = FinvizService._screener_via_overview(
-                {
-                    "Average Volume": "Over 500K",
-                    "Performance":    "Today Up",
-                    "SMA20":          "Price above SMA20",
-                    "SMA50":          "Price above SMA50",
-                    "SMA200":         "Price above SMA200",
-                },
-                n,
-            )
-            if tickers:
-                logger.info("Bullish scan (Overview): %d tickers", len(tickers))
-                return tickers
-        except Exception as e:
-            logger.debug("Overview bullish failed, falling back to URL: %s", e)
-        tickers = ScreenerService.get_candidates_from_url(BULLISH_URL, limit=n)
-        logger.info("Bullish scan (URL): %d tickers found.", len(tickers))
-        return tickers
+    def _daily_page_offset(num_pages: int = 6) -> int:
+        """
+        Rotate the starting Finviz page daily so tickers vary each day.
+        Returns a row offset (multiples of 20): 0, 20, 40, ...
+        """
+        import datetime
+        day_of_year = datetime.date.today().timetuple().tm_yday
+        return (day_of_year % num_pages) * 20
+
+    @staticmethod
+    def get_bullish_tickers(n: int = 40) -> list[str]:
+        """
+        Fetch bullish tickers from Finviz, sorted by volume.
+        Rotates starting page daily so results are never the same.
+        """
+        import random
+        logger.info("Finviz bullish scan (target=%d, volume-sorted)...", n)
+
+        start = FinvizService._daily_page_offset(6)
+        # Build URL with daily-rotated starting offset
+        url = FinvizService._BULLISH_VOL_URL + f"&r={start + 1}"
+        tickers = ScreenerService.get_candidates_from_url(url, limit=n)
+
+        if len(tickers) < 5:
+            # Fallback: first page of original URL
+            tickers = ScreenerService.get_candidates_from_url(BULLISH_URL, limit=n)
+
+        random.shuffle(tickers)
+        logger.info("Bullish scan: %d tickers found (offset=%d).", len(tickers), start)
+        return tickers[:n]
 
     @staticmethod
     def get_bearish_tickers(n: int = 20) -> list[str]:
-        """Returns up to `n` bearish momentum tickers from Finviz."""
-        logger.info("Finviz bearish scan (target=%d)...", n)
-        try:
-            tickers = FinvizService._screener_via_overview(
-                {
-                    "Average Volume": "Over 500K",
-                    "Performance":    "Today Down",
-                    "SMA20":          "Price below SMA20",
-                    "SMA50":          "Price below SMA50",
-                    "SMA200":         "Price below SMA200",
-                },
-                n,
-            )
-            if tickers:
-                logger.info("Bearish scan (Overview): %d tickers", len(tickers))
-                return tickers
-        except Exception as e:
-            logger.debug("Overview bearish failed, falling back to URL: %s", e)
-        tickers = ScreenerService.get_candidates_from_url(BEARISH_URL, limit=n)
-        logger.info("Bearish scan (URL): %d tickers found.", len(tickers))
-        return tickers
+        """
+        Fetch bearish tickers from Finviz, sorted by volume.
+        Rotates starting page daily so results are never the same.
+        """
+        import random
+        logger.info("Finviz bearish scan (target=%d, volume-sorted)...", n)
+
+        start = FinvizService._daily_page_offset(4)
+        url   = FinvizService._BEARISH_VOL_URL + f"&r={start + 1}"
+        tickers = ScreenerService.get_candidates_from_url(url, limit=n)
+
+        if len(tickers) < 3:
+            tickers = ScreenerService.get_candidates_from_url(BEARISH_URL, limit=n)
+
+        random.shuffle(tickers)
+        logger.info("Bearish scan: %d tickers found (offset=%d).", len(tickers), start)
+        return tickers[:n]
 
 
 # ── Fundamentals / news / insider context ──────────────────────────────────────

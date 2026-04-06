@@ -563,6 +563,26 @@ def _run_strategies_sync(args: list) -> list[str]:
             except Exception:
                 pass
 
+            # ── News impact analysis (cross-referenced with MongoDB) ──────
+            news_impact: dict = {}
+            news_headlines: list[str] = []
+            try:
+                from app.services.finviz_service import get_stock_context
+                from app.services.news_impact_analyzer import analyze_news_impact
+                fvz_quick = get_stock_context(ticker)
+                news_headlines = [n["title"] for n in fvz_quick.get("latest_news", [])]
+                if news_headlines:
+                    news_impact = analyze_news_impact(ticker, news_headlines, price=price)
+                    # Override trend based on news sentiment (only when strong signal)
+                    ni_score = news_impact.get("sentiment_score", 0)
+                    if not skip_cooldown:
+                        if ni_score > 0.4:
+                            base_trend = "bullish"
+                        elif ni_score < -0.4:
+                            base_trend = "bearish"
+            except Exception:
+                pass
+
             # ── Analyze chart — BB/ADX + patterns ────────────────────────
             signal = None
             trend  = base_trend
@@ -675,14 +695,33 @@ def _run_strategies_sync(args: list) -> list[str]:
 
                 fvz_block = format_context_block(fvz_ctx)
 
-                # Toxic-stock warning: insider dumping + negative GEX
+                # Toxic-stock warning: insider dumping
                 toxic_warning = ""
                 if fvz_ctx.get("massive_selling"):
                     toxic_warning = (
-                        "\n\n\u26a0\ufe0f *אזהרה קריטית:* "
+                        "\u26a0\ufe0f *אזהרה קריטית:* "
                         "פנים מוכרים בכמות חריגה! "
                         "מכירת פרמיה על מניה זו מסוכנת במיוחד."
                     )
+
+                # News impact block (cross-referenced with MongoDB history)
+                news_block = ""
+                if news_impact:
+                    ni = news_impact
+                    ni_lines = [
+                        f"📰 *השפעת חדשות:* {ni['sentiment_label']} "
+                        f"(ביטחון: {ni['confidence']})"
+                    ]
+                    if ni.get("bullish_signals"):
+                        ni_lines.append(f"   🟢 {', '.join(ni['bullish_signals'][:2])}")
+                    if ni.get("bearish_signals"):
+                        ni_lines.append(f"   🔴 {', '.join(ni['bearish_signals'][:2])}")
+                    if ni.get("historical_note"):
+                        ni_lines.append(f"   🤖 {ni['historical_note']}")
+                    macro = ni.get("macro_impact", "")
+                    if macro and "אין" not in macro:
+                        ni_lines.append(f"   🌍 {macro}")
+                    news_block = "\n".join(ni_lines)
 
                 parts = [engine.format_telegram_message(signal)]
                 if chart_line:
@@ -691,6 +730,8 @@ def _run_strategies_sync(args: list) -> list[str]:
                     parts.append(liq_line)
                 if fvz_block:
                     parts.append(fvz_block)
+                if news_block:
+                    parts.append(news_block)
                 if toxic_warning:
                     parts.append(toxic_warning)
 
@@ -1330,7 +1371,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/analyze טיקר — ניתוח מעמיק: IV + אסטרטגיה + ML\n"
         "/trade\\_check טיקר — המלצת Wheel/Spread מפורטת\n"
         "/quick\\_scan — רשימה קומפקטית: מניה | אסטרטגיה | סיכוי | הכנסה\n"
-        "/gex — מפת GEX אינטראקטיבי (הבוט ישאל איזה טיקר)\n\n"
+        "/gex — מפת GEX אינטראקטיבי (הבוט ישאל איזה טיקר)\n"
+        "/regime — משטר שוק Citadel Style (GREEN/YELLOW/RED)\n\n"
         "🔬 *מחקר:*\n"
         "/deepdive טיקר — ניתוח עמוק + דוח במייל\n\n"
         "🤖 *מודל ML:*\n"
@@ -1436,6 +1478,31 @@ def notify_trade(text: str) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# /regime — Citadel-style market regime classifier
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def cmd_regime(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/regime — Citadel-style market regime classification (GREEN/YELLOW/RED)."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text("📊 מנתח משטר שוק — Citadel Style... (30-60 שניות)")
+    try:
+        result = await asyncio.to_thread(_run_regime_sync)
+        try:
+            await update.message.reply_text(result, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(result)
+    except Exception as e:
+        logger.exception("cmd_regime failed")
+        await update.message.reply_text(f"❌ שגיאה בניתוח משטר שוק: {e}")
+
+
+def _run_regime_sync() -> str:
+    from app.services.market_regime import classify_regime, format_regime_telegram
+    return format_regime_telegram(classify_regime())
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Bot setup + run
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1490,6 +1557,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("otc",          cmd_otc_scan))
     app.add_handler(CommandHandler("train",        cmd_train_model))
     app.add_handler(CommandHandler("leaderboard",  cmd_leaderboard))
+    app.add_handler(CommandHandler("regime",       cmd_regime))
     _app = app
     return app
 

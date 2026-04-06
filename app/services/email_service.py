@@ -1972,12 +1972,23 @@ def generate_html_report(
         )
         if s.strategy_name == "iron_condor":
             strikes_html = (
-                f'Sell P <b>{s.leg1_strike}</b> / Buy P <b>{s.leg2_strike}</b> &nbsp;·&nbsp; '
-                f'Sell C <b>{s.leg3_strike}</b> / Buy C <b>{s.leg4_strike}</b>'
+                f'<span class="leg-short">↓ מכירת Put</span> <b>{s.leg1_strike}</b> / '
+                f'<span class="leg-long">↑ קניית Put</span> <b>{s.leg2_strike}</b> &nbsp;·&nbsp; '
+                f'<span class="leg-short">↓ מכירת Call</span> <b>{s.leg3_strike}</b> / '
+                f'<span class="leg-long">↑ קניית Call</span> <b>{s.leg4_strike}</b>'
             )
             why = f"Strikes at ~{s.target_delta:.2f}Δ — ±7.5% OTM for {s.probability_of_profit:.0f}% PoP"
-        elif s.strategy_name in ("bull_put_spread", "bear_call_spread"):
-            strikes_html = f'Short <b>{s.leg1_strike}</b> / Long <b>{s.leg2_strike}</b>'
+        elif s.strategy_name == "bull_put_spread":
+            strikes_html = (
+                f'<span class="leg-short">↓ מכירת Put</span> <b>{s.leg1_strike}</b> / '
+                f'<span class="leg-long">↑ קניית Put</span> <b>{s.leg2_strike}</b>'
+            )
+            why = f"Short at ~{s.target_delta:.2f}Δ → {s.probability_of_profit:.0f}% prob. of expiring worthless"
+        elif s.strategy_name == "bear_call_spread":
+            strikes_html = (
+                f'<span class="leg-short">↓ מכירת Call</span> <b>{s.leg1_strike}</b> / '
+                f'<span class="leg-long">↑ קניית Call</span> <b>{s.leg2_strike}</b>'
+            )
             why = f"Short at ~{s.target_delta:.2f}Δ → {s.probability_of_profit:.0f}% prob. of expiring worthless"
         elif s.leg2_strike > 0:
             strikes_html = f'<b>{s.leg1_strike}</b> / <b>{s.leg2_strike}</b>'
@@ -2432,6 +2443,10 @@ class EmailService:
 
         # ── Header ──────────────────────────────────────────────────────
         html = (
+            '<style>'
+            '.leg-short{color:#dc3545;font-weight:700;}'
+            '.leg-long{color:#0d6efd;font-weight:700;}'
+            '</style>'
             '<div dir="rtl" style="font-family:\'Segoe UI\',Arial,sans-serif;'
             'max-width:780px;margin:0 auto;background:#0d1117;padding:20px;">'
 
@@ -2468,8 +2483,8 @@ class EmailService:
                     f'<td style="padding:14px;background:{bg};border-radius:8px;width:50%;">'
                     f'<div style="font-weight:700;font-size:14px;color:white;margin-bottom:8px;">{emoji} {title}</div>'
                     f'<div style="color:rgba(255,255,255,0.9);font-size:13px;line-height:1.8;">'
-                    f'Short: <b>{s.get("short_strike")}</b><br>'
-                    f'Long: <b>{s.get("long_strike")}</b><br>'
+                    f'<span class="leg-short">↓ מכירה:</span> <b>{s.get("short_strike")}</b><br>'
+                    f'<span class="leg-long">↑ קנייה:</span> <b>{s.get("long_strike")}</b><br>'
                     f'קרדיט: <b>${s.get("credit")}</b><br>'
                     f'Delta: <b>{s.get("short_delta")}</b><br>'
                     f'Max Loss: <b>${s.get("max_loss")}</b><br>'
@@ -2597,9 +2612,9 @@ class EmailService:
                     # Strikes / expiry row
                     f'<div style="display:flex;gap:14px;flex-wrap:wrap;'
                     f'margin-bottom:12px;font-size:13px;">'
-                    f'<span style="color:#9ca3af;">Short: <b style="color:white">'
+                    f'<span class="leg-short">↓ מכירה: <b style="color:white">'
                     f'{opt.get("short_strike","—")}</b></span>'
-                    f'<span style="color:#9ca3af;">Long: <b style="color:white">'
+                    f'<span class="leg-long">↑ קנייה: <b style="color:white">'
                     f'{opt.get("long_strike","—")}</b></span>'
                     f'<span style="color:#9ca3af;">פקיעה: <b style="color:white">'
                     f'{opt.get("expiry","—")} ({opt.get("days","—")}d)</b></span>'
