@@ -132,6 +132,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from app.core.db import SessionLocal, init_db
 from app.models.models import AlertHistory
 from app.services.screener_service import ScreenerService
+from app.services.finviz_service import FinvizService
 from app.services.data_fetcher import DataFetcher
 
 _FINVIZ_URL = (
@@ -150,7 +151,10 @@ def run_scan():
     db = SessionLocal()
 
     try:
-        potential_stocks = ScreenerService.get_candidates_from_url(_FINVIZ_URL)
+        potential_stocks = (
+            FinvizService.get_bullish_tickers(n=30)
+            + FinvizService.get_bearish_tickers(n=10)
+        ) or ScreenerService.get_candidates_from_url(_FINVIZ_URL)
         # potential_stocks= [ "IBM" ]
         if not potential_stocks:
             print("❌ No candidates found.")

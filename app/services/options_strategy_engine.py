@@ -275,6 +275,41 @@ class OptionsStrategyEngine:
             return "DANGER - ADJUST"
         return "OK"
 
+    # ── Expiry + strike helpers ───────────────────────────────────────────────
+
+    @staticmethod
+    def get_real_expiration(ticker: str, target_dte: int = 35) -> str:
+        """Fetch the real option expiration closest to target_dte from yfinance."""
+        try:
+            import yfinance as yf
+            from datetime import datetime, timedelta
+            exps   = yf.Ticker(ticker).options
+            if not exps:
+                return (datetime.now() + timedelta(days=target_dte)).strftime("%Y-%m-%d")
+            target = datetime.now() + timedelta(days=target_dte)
+            return min(exps, key=lambda x: abs(datetime.strptime(x, "%Y-%m-%d") - target))
+        except Exception:
+            from datetime import datetime, timedelta
+            return (datetime.now() + timedelta(days=target_dte)).strftime("%Y-%m-%d")
+
+    @staticmethod
+    def get_two_sigma_strikes(price: float, iv_rank: float, trend: str) -> tuple:
+        """
+        Two Sigma probability-based strike selection at 1.5-2.0 standard deviations.
+        Returns: (short_put, long_put, short_call, long_call)
+        """
+        # OTM% scales linearly with IV rank: 6% at IVR=0, 11% at IVR=100
+        # Higher IV → wider strikes → higher PoP, less premium
+        otm_pct       = 0.06 + (iv_rank / 100) * 0.05
+        expected_move = price * otm_pct
+        wing          = max(price * 0.05, 5)
+
+        short_put  = round((price - expected_move) / 0.5) * 0.5
+        long_put   = round((short_put - wing)       / 0.5) * 0.5
+        short_call = round((price + expected_move)  / 0.5) * 0.5
+        long_call  = round((short_call + wing)      / 0.5) * 0.5
+        return short_put, long_put, short_call, long_call
+
     # ── Strategy builders ─────────────────────────────────────────────────────
 
     def _build_iron_condor(
@@ -311,11 +346,11 @@ class OptionsStrategyEngine:
                 lc = round(sc * 1.04)         # wing above short call
                 iv_note = " (BB תיאורטי)"
             else:
-                sp = round(price * 0.925); lp = round(price * 0.875)
-                sc = round(price * 1.075); lc = round(price * 1.125)
-                iv_note = " (תיאורטי)"
+                # Two Sigma probability-based strikes
+                sp, lp, sc, lc = self.get_two_sigma_strikes(price, iv_rank, "neutral")
+                iv_note = " (2σ תיאורטי)"
             wing   = sp - lp
-            credit = round(wing * 0.40, 2)
+            credit = round(wing * 0.38, 2)
             mp     = round(credit * 100, 2)
             ml     = round((wing - credit) * 100, 2)
             be_l   = round(sp - credit, 2)

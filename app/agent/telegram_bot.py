@@ -563,23 +563,18 @@ def _run_strategies_sync(args: list) -> list[str]:
             except Exception:
                 pass
 
-            # ── News impact analysis (cross-referenced with MongoDB) ──────
-            news_impact: dict = {}
-            news_headlines: list[str] = []
+            # ── News + DB context (finvizfinance × MongoDB) ───────────────
+            ticker_ctx: dict = {}
+            db_note    = ""
+            db_win_rate = None
             try:
-                from app.services.finviz_service import get_stock_context
-                from app.services.news_impact_analyzer import analyze_news_impact
-                fvz_quick = get_stock_context(ticker)
-                news_headlines = [n["title"] for n in fvz_quick.get("latest_news", [])]
-                if news_headlines:
-                    news_impact = analyze_news_impact(ticker, news_headlines, price=price)
-                    # Override trend based on news sentiment (only when strong signal)
-                    ni_score = news_impact.get("sentiment_score", 0)
-                    if not skip_cooldown:
-                        if ni_score > 0.4:
-                            base_trend = "bullish"
-                        elif ni_score < -0.4:
-                            base_trend = "bearish"
+                from app.services.news_impact_analyzer import analyze_ticker_context
+                ticker_ctx  = analyze_ticker_context(ticker, price)
+                db_note     = ticker_ctx.get("note", "")
+                db_win_rate = ticker_ctx.get("historical_win_rate")
+                db_trend    = ticker_ctx.get("sentiment", "neutral")
+                if db_trend != "neutral" and not skip_cooldown:
+                    base_trend = db_trend
             except Exception:
                 pass
 
@@ -704,24 +699,18 @@ def _run_strategies_sync(args: list) -> list[str]:
                         "מכירת פרמיה על מניה זו מסוכנת במיוחד."
                     )
 
-                # News impact block (cross-referenced with MongoDB history)
+                # News + DB insight block
                 news_block = ""
-                if news_impact:
-                    ni = news_impact
-                    ni_lines = [
-                        f"📰 *השפעת חדשות:* {ni['sentiment_label']} "
-                        f"(ביטחון: {ni['confidence']})"
-                    ]
-                    if ni.get("bullish_signals"):
-                        ni_lines.append(f"   🟢 {', '.join(ni['bullish_signals'][:2])}")
-                    if ni.get("bearish_signals"):
-                        ni_lines.append(f"   🔴 {', '.join(ni['bearish_signals'][:2])}")
-                    if ni.get("historical_note"):
-                        ni_lines.append(f"   🤖 {ni['historical_note']}")
-                    macro = ni.get("macro_impact", "")
-                    if macro and "אין" not in macro:
-                        ni_lines.append(f"   🌍 {macro}")
-                    news_block = "\n".join(ni_lines)
+                ni_lines: list[str] = []
+                if db_note:
+                    ni_lines.append(f"🤖 *DB Insight:* {db_note}")
+                if db_win_rate is not None:
+                    emoji = "🟢" if db_win_rate >= 55 else ("🔴" if db_win_rate < 40 else "🟡")
+                    ni_lines.append(f"{emoji} Win Rate היסטורי: `{db_win_rate}%`")
+                headlines = ticker_ctx.get("news_summary", [])
+                if headlines:
+                    ni_lines.append(f"📰 *חדשות:* _{headlines[0][:100]}_")
+                news_block = "\n".join(ni_lines)
 
                 parts = [engine.format_telegram_message(signal)]
                 if chart_line:
@@ -1002,20 +991,46 @@ def _sync_smart_money():
 
 
 async def cmd_news_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Run the news scanner and send alerts for significant headlines."""
+    """Show live market headlines via finvizfinance, then run full email scan."""
     if not _is_authorized(update):
         return
-    await update.message.reply_text(
-        "📰 *סריקת חדשות החלה...*\n"
-        "סורק כותרות אחרונות שמניעות את השוק.",
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    await update.message.reply_text("📰 *טוען חדשות שוק...*", parse_mode=ParseMode.MARKDOWN)
+    try:
+        # Show live headlines inline first (fast)
+        headlines_msg = await asyncio.to_thread(_sync_get_live_news)
+        await update.message.reply_text(headlines_msg, parse_mode="Markdown")
+    except Exception as e:
+        logger.debug("live news headlines failed: %s", e)
+
+    # Then run the full email scan in background
+    await update.message.reply_text("📧 מריץ סריקת חדשות מלאה — בדוק את המייל בסיום.")
     try:
         await asyncio.to_thread(_sync_news_scan)
         await update.message.reply_text("✅ *סריקת חדשות הושלמה!*", parse_mode=ParseMode.MARKDOWN)
     except Exception as exc:
         logger.exception("cmd_news_scan failed")
         await update.message.reply_text(f"❌ סריקת חדשות נכשלה: {exc}")
+
+
+def _sync_get_live_news() -> str:
+    """Fetch top market headlines via finvizfinance and return formatted message."""
+    try:
+        from finvizfinance.news import News
+        fnews    = News()
+        all_news = fnews.get_news()
+        news_df  = all_news.get("news") if isinstance(all_news, dict) else all_news
+        if news_df is None or (hasattr(news_df, "empty") and news_df.empty):
+            return "⚠️ לא נמצאו חדשות כרגע."
+        msg = "📰 *חדשות חמות מהשוק:*\n\n"
+        for _, row in news_df.head(10).iterrows():
+            title  = str(row.get("Title", "")).replace("\r\n", " ").strip()[:100]
+            source = str(row.get("Source", ""))
+            if title:
+                msg += f"🔹 *{title}*\n   _{source}_\n\n"
+        return msg or "⚠️ לא נמצאו חדשות."
+    except Exception as e:
+        return f"⚠️ לא ניתן לטעון חדשות: {e}"
+
 
 def _sync_news_scan():
     from run_news_scan import run_hybrid_scan

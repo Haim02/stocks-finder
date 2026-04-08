@@ -160,3 +160,125 @@ def _neutral_result(reason: str) -> dict:
         "recommended_strategy": "Iron Condor",
         "confidence":           "נמוך",
     }
+
+
+# ── New unified entry point using finvizfinance ───────────────────────────────
+
+_BULL_WORDS = [
+    "beat", "upgrade", "growth", "raised", "record", "approval", "buyback",
+    "dividend", "partnership", "expansion", "wins", "profit", "strong",
+]
+_BEAR_WORDS = [
+    "miss", "downgrade", "cut", "loss", "investigation", "recall", "lawsuit",
+    "fine", "delay", "warning", "decline", "layoff", "fraud", "shortage",
+]
+
+
+def analyze_ticker_context(ticker: str, price: float = 0.0) -> dict:
+    """
+    Unified context analysis using finvizfinance (real news + fundamentals)
+    cross-referenced with MongoDB training_events for historical win rate.
+
+    Returns:
+        sentiment        : "bullish" | "bearish" | "neutral"
+        sentiment_score  : float  — -1.0 to +1.0
+        historical_win_rate : float | None
+        best_hist_strategy  : str | None
+        news_summary     : list[str]
+        sector           : str
+        note             : str  — Hebrew summary line
+    """
+    context: dict = {
+        "sentiment":            "neutral",
+        "sentiment_score":      0.0,
+        "historical_win_rate":  None,
+        "best_hist_strategy":   None,
+        "news_summary":         [],
+        "sector":               "Unknown",
+        "note":                 "",
+    }
+
+    # ── finvizfinance: sector + news ──────────────────────────────────────
+    try:
+        from finvizfinance.quote import finvizfinance as fvf
+        stock = fvf(ticker)
+
+        try:
+            fund = stock.ticker_fundament()
+            context["sector"] = fund.get("Sector", "Unknown")
+        except Exception:
+            pass
+
+        try:
+            news_df = stock.ticker_news()
+            if news_df is not None and not news_df.empty:
+                headlines = [
+                    str(row.get("Title", "")).replace("\r\n", " ").strip()
+                    for _, row in news_df.head(5).iterrows()
+                ]
+                context["news_summary"] = [h for h in headlines if h]
+                text       = " ".join(context["news_summary"]).lower()
+                bull_score = sum(1 for w in _BULL_WORDS if w in text)
+                bear_score = sum(1 for w in _BEAR_WORDS if w in text)
+                if bull_score + bear_score > 0:
+                    context["sentiment_score"] = (bull_score - bear_score) / (bull_score + bear_score)
+        except Exception:
+            pass
+
+    except Exception as e:
+        logger.debug("finvizfinance context failed for %s: %s", ticker, e)
+
+    # ── MongoDB historical cross-reference ────────────────────────────────
+    try:
+        from app.data.mongo_client import MongoDB
+        db   = MongoDB.get_db()
+        past = list(db["training_events"].find({
+            "ticker":  ticker.upper(),
+            "labeled": True,
+            "label":   {"$ne": None},
+        }).sort("scan_at", -1).limit(30))
+
+        if not past:
+            # legacy collection name
+            past = list(db["train"].find({
+                "ticker":    ticker.upper(),
+                "processed": True,
+                "label":     {"$ne": None},
+            }).sort("timestamp", -1).limit(30))
+
+        if past:
+            wins     = sum(1 for e in past if e.get("label") in (True, 1))
+            total    = len(past)
+            win_rate = round(wins / total * 100, 1)
+            context["historical_win_rate"] = win_rate
+
+            strat_wins: dict[str, int] = {}
+            for e in past:
+                if e.get("label") in (True, 1):
+                    s = e.get("strategy_name") or e.get("strategy") or "unknown"
+                    strat_wins[s] = strat_wins.get(s, 0) + 1
+            if strat_wins:
+                context["best_hist_strategy"] = max(strat_wins, key=strat_wins.get)
+
+            note = f"היסטוריה: {win_rate}% ניצחון ב-{total} עסקאות"
+            if context["best_hist_strategy"]:
+                note += f" | אסטרטגיה מנצחת: {context['best_hist_strategy']}"
+            if win_rate < 35:
+                note += " | ⚠️ Win rate נמוך — זהירות"
+                context["sentiment"] = "bearish"
+            context["note"] = note
+
+    except Exception as e:
+        logger.debug("MongoDB cross-reference failed for %s: %s", ticker, e)
+
+    # ── Final sentiment label ─────────────────────────────────────────────
+    score = context["sentiment_score"]
+    if context["sentiment"] != "bearish":   # don't override DB-forced bearish
+        if score > 0.3:
+            context["sentiment"] = "bullish"
+        elif score < -0.3:
+            context["sentiment"] = "bearish"
+        else:
+            context["sentiment"] = "neutral"
+
+    return context
