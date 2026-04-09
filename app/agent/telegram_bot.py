@@ -379,19 +379,31 @@ async def cmd_strategies(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """
     /strategies [TICKER1 TICKER2 ...]
 
-    Run the multi-strategy options engine. Without args: scans fresh Finviz tickers.
-    With args: analyze specific tickers only (max 10).
+    Run the multi-strategy options engine.
+    Without args: scans S&P 500 + Nasdaq 100, rotated daily.
+    With args: analyze specific tickers only (max 15).
     """
     if not _is_authorized(update):
         return
 
-    args = list(context.args) if context.args else []
-    await update.message.reply_text("⏳ מריץ מנוע אסטרטגיות אופציות...")
+    args        = list(context.args) if context.args else []
+    source_desc = " ".join(args).upper() if args else "S&P 500 + Nasdaq 100"
+
+    await update.message.reply_text(
+        f"🎯 *סריקת אסטרטגיות אופציות*\n\n"
+        f"📊 מקור מניות: {source_desc}\n"
+        f"🔄 מסנן לפי: IV Rank, RSI, גרף, חדשות, DB\n"
+        f"⏳ אנא המתן...",
+        parse_mode="Markdown",
+    )
 
     try:
         messages = await asyncio.to_thread(_run_strategies_sync, args)
         if not messages:
-            await update.message.reply_text("⚠️ לא נמצאו אותות אסטרטגיה בתנאי השוק הנוכחיים.")
+            await update.message.reply_text(
+                "📊 לא נמצאו איתותי אסטרטגיה עכשיו.\n"
+                "💡 כל המניות בצינון 5 ימים או אין תנאים מתאימים.",
+            )
             return
         for msg in messages:
             try:
@@ -423,22 +435,25 @@ def _log_ticker_for_training(ticker: str, price: float, strategy_name: str) -> N
 def _run_strategies_sync(args: list) -> list[str]:
     """
     Returns list of formatted Telegram messages, one per signal.
-    Fixed:
-    - Fetches Finviz + TradingView tickers (not inside loop)
-    - Assigns correct trend per ticker
-    - Handles SPX/index tickers correctly (^GSPC, ^SPX → SPY)
-    - Falls back gracefully when IV rank unavailable
-    - Tries multiple trend values to find a signal
+
+    Ticker source:
+    - Default (no args): S&P 500 + Nasdaq 100, rotated daily (index_universe.py)
+    - With args: specific tickers provided by user
+
+    Pipeline:
+    1. Build ticker list from index universe (or user args)
+    2. Apply 5-day cooldown filter
+    3. Score with XGBoost → top 20
+    4. For each: RSI, chart patterns, finvizfinance context, news sentiment, strategy
     """
     import yfinance as yf
     from app.services.options_strategy_engine import OptionsStrategyEngine
     from app.services.iv_calculator import get_iv_rank, get_vix_level, check_earnings_soon
-    from app.services.finviz_service import FinvizService
     from app.data.mongo_client import MongoDB
 
-    engine   = OptionsStrategyEngine()
-    vix      = get_vix_level()
-    messages = []
+    engine        = OptionsStrategyEngine()
+    vix           = get_vix_level()
+    messages: list[str] = []
     COOLDOWN_DAYS = 5
 
     # ── Ticker normalization ──────────────────────────────────────────────
@@ -452,121 +467,115 @@ def _run_strategies_sync(args: list) -> list[str]:
     def normalize(t: str) -> str:
         return TICKER_MAP.get(t.upper(), t.upper())
 
-    # ── Build ticker list ─────────────────────────────────────────────────
+    # ── STEP A: Build ticker list ─────────────────────────────────────────
     if args:
-        raw = [normalize(t) for t in args[:10]]
-        tickers_with_trend = [(t, "neutral") for t in raw]
+        tickers_raw   = [normalize(t) for t in args[:15]]
         skip_cooldown = True
+        logger.info("[STRATEGIES] Manual tickers: %s", tickers_raw)
     else:
-        # Fetch from Finviz ONCE — before any loop
-        bull_tickers: list[str] = []
-        bear_tickers: list[str] = []
-        tv_tickers:   list[str] = []
-
         try:
-            import random
-            raw_bull = FinvizService.get_bullish_tickers(n=20) or []
-            bull_tickers = random.sample(raw_bull, min(12, len(raw_bull)))
+            from app.services.index_universe import get_daily_candidates
+            tickers_raw = get_daily_candidates(n=40, include_sp500=True, include_nasdaq=True)
+            logger.info("[STRATEGIES] Index universe: %d candidates", len(tickers_raw))
         except Exception as e:
-            logger.warning("Finviz bullish failed: %s", e)
-
-        try:
+            logger.warning("[STRATEGIES] Index universe failed: %s — using fallback", e)
             import random
-            raw_bear = FinvizService.get_bearish_tickers(n=10) or []
-            bear_tickers = random.sample(raw_bear, min(6, len(raw_bear)))
-        except Exception as e:
-            logger.warning("Finviz bearish failed: %s", e)
-
-        # Also try TradingView if available
-        try:
-            from app.services.tradingview_service import TradingViewService
-            tv_raw = TradingViewService.get_candidates_from_url(
-                "https://www.tradingview.com/screener/BmHEGvNM/"
-            ) or []
-            tv_tickers = [normalize(t) for t in tv_raw[:8]]
-        except Exception:
-            tv_tickers = []
-
-        seen: set[str] = set()
-        tickers_with_trend: list[tuple[str, str]] = []
-
-        for t in bull_tickers:
-            t = normalize(t)
-            if t not in seen:
-                tickers_with_trend.append((t, "bullish"))
-                seen.add(t)
-
-        for t in bear_tickers:
-            t = normalize(t)
-            if t not in seen:
-                tickers_with_trend.append((t, "bearish"))
-                seen.add(t)
-
-        for t in tv_tickers:
-            if t not in seen:
-                tickers_with_trend.append((t, "neutral"))
-                seen.add(t)
-
+            fallback = [
+                "AAPL", "MSFT", "NVDA", "META", "AMZN", "GOOGL", "TSLA", "AMD",
+                "JPM", "V", "MA", "BAC", "XOM", "CVX", "JNJ", "PFE", "HD", "MCD",
+                "NFLX", "COST", "AVGO", "QCOM", "ADBE", "CRM", "INTC", "ORCL",
+            ]
+            random.shuffle(fallback)
+            tickers_raw = fallback[:30]
         skip_cooldown = False
 
-    # ── Fallback: if Finviz returned nothing, use default watchlist ───────
-    if not tickers_with_trend:
-        DEFAULT_WATCHLIST: list[tuple[str, str]] = [
-            ("SPY", "neutral"), ("QQQ", "neutral"), ("AAPL", "bullish"),
-            ("NVDA", "bullish"), ("TSLA", "neutral"), ("AMD", "bullish"),
-            ("MSFT", "bullish"), ("META", "bullish"), ("AMZN", "bullish"),
-        ]
-        tickers_with_trend = DEFAULT_WATCHLIST
-        logger.warning("[STRATEGIES] Finviz returned nothing — using default watchlist")
-
-    # ── Process each ticker ───────────────────────────────────────────────
-    for ticker, base_trend in tickers_with_trend[:15]:
-
-        # Cooldown check
-        if not skip_cooldown:
+    # ── STEP B: Cooldown filter ───────────────────────────────────────────
+    tickers_to_scan: list[str] = []
+    for ticker in tickers_raw:
+        if skip_cooldown:
+            tickers_to_scan.append(ticker)
+        else:
             try:
-                if MongoDB.was_strategy_sent_recently(ticker, days=COOLDOWN_DAYS):
-                    logger.info("strategies: %s in cooldown — skipping", ticker)
-                    continue
+                if not MongoDB.was_strategy_sent_recently(ticker, days=COOLDOWN_DAYS):
+                    tickers_to_scan.append(ticker)
             except Exception:
-                pass
+                tickers_to_scan.append(ticker)   # include if check fails
 
+    logger.info("[STRATEGIES] After cooldown: %d tickers", len(tickers_to_scan))
+
+    # ── STEP C: XGBoost scoring → top 20 ─────────────────────────────────
+    try:
+        from app.services.ml_service import predict_confidence
+        scored: list[tuple[float, str]] = []
+        for t in tickers_to_scan:
+            conf = predict_confidence(t)
+            scored.append((conf if conf is not None else 0.0, t))
+        scored.sort(reverse=True)
+        tickers_to_scan = [t for _, t in scored[:20]]
+        logger.info("[STRATEGIES] XGBoost top-20: %s", tickers_to_scan[:5])
+    except Exception:
+        tickers_to_scan = tickers_to_scan[:20]
+
+    # ── STEP D: Analyze each ticker ───────────────────────────────────────
+    for ticker in tickers_to_scan:
         try:
             stock = yf.Ticker(ticker)
             price = stock.fast_info.last_price
             if not price or price <= 0:
                 continue
 
-            # Get IV rank — default to 50 if unavailable (medium)
+            # RSI(14)
+            rsi_val = 50.0
+            try:
+                hist = stock.history(period="2mo")
+                if len(hist) >= 14:
+                    delta   = hist["Close"].diff()
+                    gain    = delta.clip(lower=0).rolling(14).mean()
+                    loss    = (-delta.clip(upper=0)).rolling(14).mean()
+                    rsi_val = float((100 - 100 / (1 + gain / loss)).iloc[-1])
+            except Exception:
+                pass
+
+            # IV + earnings
             try:
                 iv_rank = get_iv_rank(ticker)
             except Exception:
                 iv_rank = 50.0
 
-            # Get earnings
             try:
                 earnings = check_earnings_soon(ticker, days=7)
             except Exception:
                 earnings = False
 
-            # Calculate RSI from price history
-            rsi_val = 50.0
+            # ── Chart patterns (TA) ───────────────────────────────────────
+            base_trend = "neutral"
+            chart: dict = {}
             try:
-                hist = stock.history(period="1mo")
-                if len(hist) >= 14:
-                    delta = hist["Close"].diff()
-                    gain  = delta.clip(lower=0).rolling(14).mean()
-                    loss  = (-delta.clip(upper=0)).rolling(14).mean()
-                    rs    = gain / loss
-                    rsi_s = 100 - (100 / (1 + rs))
-                    rsi_val = float(rsi_s.iloc[-1])
+                from app.ta.chart_patterns import analyze_chart
+                hist_3mo = stock.history(period="3mo")
+                chart    = analyze_chart(ticker, hist_3mo)
+                if chart.get("is_sideways"):
+                    base_trend = "neutral"
+                elif chart.get("trend_override"):
+                    base_trend = chart["trend_override"]
+                elif chart.get("score", 5) >= 7:
+                    base_trend = "strong_bullish"
+                elif chart.get("score", 5) >= 6:
+                    base_trend = "bullish"
+                elif chart.get("score", 5) <= 3:
+                    base_trend = "strong_bearish"
+                elif chart.get("score", 5) <= 4:
+                    base_trend = "bearish"
             except Exception:
-                pass
+                chart = {}
+
+            upper_bb = chart.get("upper_bb", 0.0) or 0.0
+            lower_bb = chart.get("lower_bb", 0.0) or 0.0
 
             # ── News + DB context (finvizfinance × MongoDB) ───────────────
             ticker_ctx: dict = {}
-            db_note    = ""
-            db_win_rate = None
+            db_note         = ""
+            db_win_rate     = None
             try:
                 from app.services.news_impact_analyzer import analyze_ticker_context
                 ticker_ctx  = analyze_ticker_context(ticker, price)
@@ -578,30 +587,10 @@ def _run_strategies_sync(args: list) -> list[str]:
             except Exception:
                 pass
 
-            # ── Analyze chart — BB/ADX + patterns ────────────────────────
-            signal = None
-            trend  = base_trend
-            chart  = {}
-
-            try:
-                from app.ta.chart_patterns import analyze_chart
-                hist_3mo = stock.history(period="3mo")
-                chart    = analyze_chart(ticker, hist_3mo)
-
-                # If BB/ADX says sideways → force neutral (Iron Condor territory)
-                if chart.get("is_sideways") and not skip_cooldown:
-                    trend = "neutral"
-                elif chart.get("trend_override") and not skip_cooldown:
-                    trend = chart["trend_override"]
-            except Exception:
-                chart = {}
-
-            # Extract BB levels for Iron Condor alignment
-            upper_bb = chart.get("upper_bb", 0.0) or 0.0
-            lower_bb = chart.get("lower_bb", 0.0) or 0.0
+            trend = base_trend
 
             # ── Build signal ──────────────────────────────────────────────
-            # If sideways detected, build BB-aligned Iron Condor directly
+            signal = None
             if chart.get("is_sideways") and not skip_cooldown and iv_rank >= 30:
                 signal = engine._build_iron_condor(
                     ticker, price, iv_rank, 35,
@@ -621,11 +610,8 @@ def _run_strategies_sync(args: list) -> list[str]:
                     has_earnings_soon=earnings, dte_preference=35,
                 )
 
-            # If no signal, try trend fallbacks
             if not signal:
-                trend_fallbacks = ["neutral", "bullish", "bearish",
-                                   "strong_bullish", "strong_bearish"]
-                for try_trend in trend_fallbacks:
+                for try_trend in ["neutral", "bullish", "bearish", "strong_bullish", "strong_bearish"]:
                     if try_trend == trend:
                         continue
                     signal = engine.select_strategy(
@@ -636,104 +622,97 @@ def _run_strategies_sync(args: list) -> list[str]:
                     if signal:
                         break
 
-            # Last resort: force a strategy based on IV level
             if not signal:
                 if iv_rank >= 30:
                     signal = engine._build_iron_condor(
                         ticker, price, iv_rank, 35,
                         upper_bb=upper_bb, lower_bb=lower_bb,
                     )
-                    signal.rationale = "איתות ברירת מחדל — IV בינוני, שוק ניטרלי"
+                    signal.rationale = "ברירת מחדל — מניית מדד, IV בינוני"
                 else:
                     signal = engine._build_bull_call_spread(ticker, price, iv_rank, 35)
                     signal.rationale = "IV נמוך — ספרד קנייה בדביט"
                 signal = engine._apply_margin(signal)
 
-            # ── STRICT LIQUIDITY KILL SWITCH ─────────────────────────────
-            # Skip tickers with no real option market (volume < 10 OR OI < 50)
+            # ── Liquidity kill switch ─────────────────────────────────────
             if signal and signal.net_credit > 0:
                 try:
                     from app.services.iv_calculator import get_real_option_data
                     liq = get_real_option_data(ticker, signal.dte, option_type="put")
-                    vol = liq.get("volume", 0)
-                    oi  = liq.get("open_interest", 0)
-                    if vol < 10 or oi < 50:
-                        logger.info(
-                            "strategies: %s killed — low liquidity vol=%d OI=%d",
-                            ticker, vol, oi,
-                        )
+                    if liq.get("volume", 0) < 10 or liq.get("open_interest", 0) < 50:
+                        logger.info("strategies: %s killed — low liquidity", ticker)
                         continue
                 except Exception:
-                    pass  # if we can't check, let it through
+                    pass
 
-            if signal:
-                # ── Per-ticker context: FinViz fundamentals + chart ───────
-                from app.services.finviz_service import (
-                    get_stock_context, format_context_block,
+            if not signal:
+                continue
+
+            # ── Finviz context block ──────────────────────────────────────
+            from app.services.finviz_service import get_stock_context, format_context_block
+            fvz_ctx   = get_stock_context(ticker)
+            fvz_block = format_context_block(fvz_ctx)
+
+            toxic_warning = ""
+            if fvz_ctx.get("massive_selling"):
+                toxic_warning = (
+                    "\u26a0\ufe0f *אזהרה קריטית:* "
+                    "פנים מוכרים בכמות חריגה! "
+                    "מכירת פרמיה על מניה זו מסוכנת במיוחד."
                 )
-                fvz_ctx = get_stock_context(ticker)
 
-                # Chart summary (already-fetched)
-                chart_line = f"📊 {chart['summary']}" if chart.get("summary") else ""
+            # Chart line
+            chart_line = f"📊 {chart['summary']}" if chart.get("summary") else ""
 
-                # Liquidity confirmation (already passed kill switch above)
-                liq_line = ""
-                try:
-                    from app.services.iv_calculator import get_real_option_data
-                    if signal.net_credit > 0:
-                        liq = get_real_option_data(ticker, signal.dte, option_type="put")
-                        vol = liq.get("volume", 0)
-                        oi  = liq.get("open_interest", 0)
-                        liq_line = f"✅ נזילות: volume={vol}, OI={oi}"
-                except Exception:
-                    pass
+            # Liquidity confirmation
+            liq_line = ""
+            try:
+                from app.services.iv_calculator import get_real_option_data
+                if signal.net_credit > 0:
+                    liq = get_real_option_data(ticker, signal.dte, option_type="put")
+                    liq_line = f"✅ נזילות: volume={liq.get('volume',0)}, OI={liq.get('open_interest',0)}"
+            except Exception:
+                pass
 
-                fvz_block = format_context_block(fvz_ctx)
+            # DB insight + news block
+            ni_lines: list[str] = []
+            if db_note:
+                ni_lines.append(f"🤖 *DB Insight:* {db_note}")
+            if db_win_rate is not None:
+                wr_emoji = "🟢" if db_win_rate >= 55 else ("🔴" if db_win_rate < 40 else "🟡")
+                ni_lines.append(f"{wr_emoji} Win Rate היסטורי: `{db_win_rate}%`")
+            headlines = ticker_ctx.get("news_summary", [])
+            if headlines:
+                ni_lines.append(f"📰 *חדשות:* _{headlines[0][:100]}_")
+            news_block = "\n".join(ni_lines)
 
-                # Toxic-stock warning: insider dumping
-                toxic_warning = ""
-                if fvz_ctx.get("massive_selling"):
-                    toxic_warning = (
-                        "\u26a0\ufe0f *אזהרה קריטית:* "
-                        "פנים מוכרים בכמות חריגה! "
-                        "מכירת פרמיה על מניה זו מסוכנת במיוחד."
-                    )
+            parts = [engine.format_telegram_message(signal)]
+            if chart_line:
+                parts.append(chart_line)
+            if liq_line:
+                parts.append(liq_line)
+            if fvz_block:
+                parts.append(fvz_block)
+            if news_block:
+                parts.append(news_block)
+            if toxic_warning:
+                parts.append(toxic_warning)
 
-                # News + DB insight block
-                news_block = ""
-                ni_lines: list[str] = []
-                if db_note:
-                    ni_lines.append(f"🤖 *DB Insight:* {db_note}")
-                if db_win_rate is not None:
-                    emoji = "🟢" if db_win_rate >= 55 else ("🔴" if db_win_rate < 40 else "🟡")
-                    ni_lines.append(f"{emoji} Win Rate היסטורי: `{db_win_rate}%`")
-                headlines = ticker_ctx.get("news_summary", [])
-                if headlines:
-                    ni_lines.append(f"📰 *חדשות:* _{headlines[0][:100]}_")
-                news_block = "\n".join(ni_lines)
+            signal.telegram_message = "\n\n".join(parts)
+            messages.append(signal.telegram_message)
 
-                parts = [engine.format_telegram_message(signal)]
-                if chart_line:
-                    parts.append(chart_line)
-                if liq_line:
-                    parts.append(liq_line)
-                if fvz_block:
-                    parts.append(fvz_block)
-                if news_block:
-                    parts.append(news_block)
-                if toxic_warning:
-                    parts.append(toxic_warning)
+            # Persist
+            try:
+                if not skip_cooldown:
+                    MongoDB.log_strategy_sent(ticker, signal.strategy_name, price)
+                _log_ticker_for_training(ticker, price, signal.strategy_name)
+            except Exception:
+                pass
 
-                signal.telegram_message = "\n\n".join(parts)
-                messages.append(signal.telegram_message)
-
-                # Save to MongoDB + training
-                try:
-                    if not skip_cooldown:
-                        MongoDB.log_strategy_sent(ticker, signal.strategy_name, price)
-                    _log_ticker_for_training(ticker, price, signal.strategy_name)
-                except Exception:
-                    pass
+            logger.info(
+                "[STRATEGIES] %s → %s | trend=%s | IV=%.0f | RSI=%.0f",
+                ticker, signal.strategy_display, trend, iv_rank, rsi_val,
+            )
 
         except Exception as e:
             logger.warning("strategies %s: %s", ticker, e)
@@ -1381,8 +1360,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/intelligence — ניתוח מאקרו + רוטציית סקטורים\n"
         "/otc — סורק מניות OTC\n\n"
         "🎯 *אסטרטגיות אופציות:*\n"
-        "/strategies — סריקת מניות Finviz לאסטרטגיה האופטימלית\n"
-        "/strategies AAPL TSLA — ניתוח מניות ספציפיות\n"
+        "/strategies — S\\&P 500 + Nasdaq 100, מתחלף יומי\n"
+        "/strategies AAPL TSLA NVDA — מניות ספציפיות\n"
         "/analyze טיקר — ניתוח מעמיק: IV + אסטרטגיה + ML\n"
         "/trade\\_check טיקר — המלצת Wheel/Spread מפורטת\n"
         "/quick\\_scan — רשימה קומפקטית: מניה | אסטרטגיה | סיכוי | הכנסה\n"
