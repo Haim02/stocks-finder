@@ -239,10 +239,9 @@ def analyze_ticker_context(ticker: str, price: float = 0.0) -> dict:
         }).sort("scan_at", -1).limit(30))
 
         if not past:
-            # legacy collection name
+            # primary collection name (legacy)
             past = list(db["train"].find({
                 "ticker":    ticker.upper(),
-                "processed": True,
                 "label":     {"$ne": None},
             }).sort("timestamp", -1).limit(30))
 
@@ -263,8 +262,8 @@ def analyze_ticker_context(ticker: str, price: float = 0.0) -> dict:
             note = f"היסטוריה: {win_rate}% ניצחון ב-{total} עסקאות"
             if context["best_hist_strategy"]:
                 note += f" | אסטרטגיה מנצחת: {context['best_hist_strategy']}"
-            if win_rate < 35:
-                note += " | ⚠️ Win rate נמוך — זהירות"
+            if win_rate < 40:
+                note += " | 🚨 High Risk — Win rate נמוך"
                 context["sentiment"] = "bearish"
             context["note"] = note
 

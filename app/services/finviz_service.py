@@ -70,7 +70,7 @@ class FinvizService:
             ov = Overview()
             ov.set_filter(
                 signal="Top Gainers",
-                filters_dict={"Average Volume": "Over 500K", "Price": "Over $5"},
+                filters_dict={"Index": "S&P 500,NASDAQ", "Average Volume": "Over 500K", "Price": "Over $5"},
             )
             df = ov.screener_view()
             if df is not None and not df.empty:
@@ -115,7 +115,7 @@ class FinvizService:
             ov = Overview()
             ov.set_filter(
                 signal="Top Losers",
-                filters_dict={"Average Volume": "Over 500K", "Price": "Over $5"},
+                filters_dict={"Index": "S&P 500,NASDAQ", "Average Volume": "Over 500K", "Price": "Over $5"},
             )
             df = ov.screener_view()
             if df is not None and not df.empty:
