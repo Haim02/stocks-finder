@@ -1660,21 +1660,14 @@ async def riskcheck_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 
-async def orchestrator_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/status — Show orchestrator health: all 3 agents, run history, schedule."""
-    if not _is_authorized(update):
-        return
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show health status of all 3 agents."""
     try:
-        from run_agent import _orchestrator
-        if _orchestrator is None:
-            await update.message.reply_text(
-                "⚠️ Orchestrator לא אותחל עדיין (daemon mode לא פעיל)."
-            )
-            return
-        status_text = await asyncio.to_thread(_orchestrator.get_status)
-        await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
+        from app.agent.orchestrator import AgentOrchestrator
+        o = AgentOrchestrator()
+        status_msg = o.get_status()
+        await update.message.reply_text(status_msg, parse_mode="Markdown")
     except Exception as e:
-        logger.exception("orchestrator_status_command failed")
         await update.message.reply_text(f"⚠️ שגיאה בשליפת סטטוס: {e}")
 
 
@@ -1711,7 +1704,7 @@ def build_app() -> Application:
     # ── Core ──────────────────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",        cmd_start))
     app.add_handler(CommandHandler("help",         cmd_help))
-    app.add_handler(CommandHandler("status",       orchestrator_status_command))
+    app.add_handler(CommandHandler("status",       status_command))
     app.add_handler(CommandHandler("market",       cmd_status))
     app.add_handler(CommandHandler("options",      cmd_options_0dte))
     app.add_handler(CommandHandler("scan",         cmd_scan))
