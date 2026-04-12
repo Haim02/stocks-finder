@@ -30,6 +30,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_orchestrator = None  # set in run_daemon() once AgentOrchestrator is created
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # One-shot agent run
@@ -122,9 +124,62 @@ def run_daemon() -> None:
         replace_existing=True,
         misfire_grace_time=300,
     )
+
+    global _orchestrator
+    from app.agent.orchestrator import AgentOrchestrator
+    _orchestrator = AgentOrchestrator()
+
+    # Agent 1 + Agent 2 morning pipeline (10:00 Israel)
+    scheduler.add_job(
+        _orchestrator.run_morning_pipeline,
+        trigger=CronTrigger(
+            day_of_week="mon-fri",
+            hour=10,
+            minute=0,
+            timezone=SCAN_TZ,
+        ),
+        id="morning_pipeline",
+        name="Morning Pipeline — Agent 1 + Agent 2 (10:00 Israel)",
+        replace_existing=True,
+        misfire_grace_time=300,
+    )
+    logger.info("Morning pipeline scheduled: 10:00 Israel time (Mon–Fri)")
+
+    # Agent 3 — Risk Manager (hourly 09:30–16:30 Israel)
+    scheduler.add_job(
+        _orchestrator.run_risk_check,
+        trigger=CronTrigger(
+            day_of_week="mon-fri",
+            hour="9-16",
+            minute=30,
+            timezone=SCAN_TZ,
+        ),
+        id="risk_check",
+        name="Agent 3 — Risk Manager (hourly 09:30–16:30)",
+        replace_existing=True,
+        misfire_grace_time=120,
+    )
+    logger.info("Agent 3 scheduled: every hour 09:30–16:30 Israel time (Mon–Fri)")
+
+    # Daily summary (16:45 Israel)
+    scheduler.add_job(
+        _orchestrator.run_daily_summary,
+        trigger=CronTrigger(
+            day_of_week="mon-fri",
+            hour=16,
+            minute=45,
+            timezone=SCAN_TZ,
+        ),
+        id="daily_summary",
+        name="Daily Summary (16:45 Israel)",
+        replace_existing=True,
+        misfire_grace_time=300,
+    )
+    logger.info("Daily summary scheduled: 16:45 Israel time (Mon–Fri)")
+
     scheduler.start()
 
-    next_run = scheduler.get_job("daily_agent_run").next_run_time
+    next_run = scheduler.get_job("morning_pipeline").next_run_time
     env_label = os.getenv("RAILWAY_ENVIRONMENT", "local")
     logger.info("╔══════════════════════════════════════════════╗")
     logger.info("║   Daemon Mode — Scheduler + Telegram Bot     ║")

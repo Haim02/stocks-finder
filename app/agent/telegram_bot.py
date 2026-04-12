@@ -40,8 +40,16 @@ from telegram.ext import (
 )
 
 from app.core.config import settings
+from app.agent.free_chat import FreeChatHandler
 
 logger = logging.getLogger(__name__)
+
+# ── Free chat handler (natural Hebrew conversation with Claude) ────────────────
+_free_chat = FreeChatHandler()
+
+
+async def free_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _free_chat.handle(update, context)
 
 # ── Conversation states ───────────────────────────────────────────────────────
 GEX_WAITING_TICKER = 1   # /gex: waiting for user to type ticker name
@@ -1472,28 +1480,202 @@ def notify_trade(text: str) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# /regime — Citadel-style market regime classifier
+# /regime — Agent 1: Market Regime Analyst
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def cmd_regime(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/regime — Citadel-style market regime classification (GREEN/YELLOW/RED)."""
+    """/regime — Run Agent 1 (Market Regime Analyst) on demand."""
     if not _is_authorized(update):
         return
-    await update.message.reply_text("📊 מנתח משטר שוק — Citadel Style... (30-60 שניות)")
+    await update.message.reply_text("🧠 מריץ את Agent 1 — Market Regime Analyst...")
     try:
-        result = await asyncio.to_thread(_run_regime_sync)
+        from app.agent.market_regime_agent import MarketRegimeAgent
+        report = await asyncio.to_thread(lambda: MarketRegimeAgent().run())
         try:
-            await update.message.reply_text(result, parse_mode="Markdown")
+            await update.message.reply_text(report.summary_hebrew, parse_mode="Markdown")
         except Exception:
-            await update.message.reply_text(result)
+            await update.message.reply_text(report.summary_hebrew)
     except Exception as e:
         logger.exception("cmd_regime failed")
         await update.message.reply_text(f"❌ שגיאה בניתוח משטר שוק: {e}")
 
 
-def _run_regime_sync() -> str:
-    from app.services.market_regime import classify_regime, format_regime_telegram
-    return format_regime_telegram(classify_regime())
+# ══════════════════════════════════════════════════════════════════════════════
+# /strategist — Agent 2: Options Strategist
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def cmd_strategist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/strategist — Run Agent 2 (Options Strategist) on demand."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text("👨‍💼 מריץ את Agent 2 — Options Strategist...")
+    try:
+        from app.agent.options_strategist_agent import OptionsStrategistAgent
+        report = await asyncio.to_thread(lambda: OptionsStrategistAgent().run())
+        msg = report.summary_hebrew[:4000]
+        try:
+            await update.message.reply_text(msg, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(msg)
+    except Exception as e:
+        logger.exception("cmd_strategist failed")
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Agent 3 Commands — Position tracking & risk management
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/positions — Show all open positions."""
+    if not _is_authorized(update):
+        return
+    from app.agent.risk_manager_agent import RiskManagerAgent
+    summary = RiskManagerAgent.get_open_positions_summary()
+    try:
+        await update.message.reply_text(summary, parse_mode="Markdown")
+    except Exception:
+        await update.message.reply_text(summary)
+
+
+async def addposition_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /addposition — Add a new open position.
+    Usage: /addposition TICKER STRATEGY SHORT_STRIKE LONG_STRIKE CREDIT EXPIRATION [CONTRACTS]
+    Example: /addposition AAPL BullPutSpread 175 170 1.65 2026-05-16 2
+    """
+    if not _is_authorized(update):
+        return
+    try:
+        args = context.args
+        if not args or len(args) < 6:
+            await update.message.reply_text(
+                "📝 *שימוש:*\n"
+                "`/addposition TICKER STRATEGY SHORT_STRIKE LONG_STRIKE CREDIT EXPIRATION [CONTRACTS]`\n\n"
+                "*דוגמה:*\n"
+                "`/addposition AAPL BullPutSpread 175 170 1.65 2026-05-16 2`\n\n"
+                "STRATEGY: BullPutSpread | BearCallSpread | IronCondor",
+                parse_mode="Markdown",
+            )
+            return
+
+        ticker       = args[0].upper()
+        strategy     = (args[1]
+                        .replace("BullPutSpread", "Bull Put Spread")
+                        .replace("BearCallSpread", "Bear Call Spread")
+                        .replace("IronCondor", "Iron Condor"))
+        short_strike = float(args[2])
+        long_strike  = float(args[3])
+        credit       = float(args[4])
+        expiration   = args[5]  # YYYY-MM-DD
+        contracts    = int(args[6]) if len(args) > 6 else 1
+        spread_width = abs(short_strike - long_strike)
+
+        from app.agent.risk_manager_agent import RiskManagerAgent
+        ok = RiskManagerAgent.add_position(
+            ticker=ticker,
+            strategy=strategy,
+            short_strike=short_strike,
+            long_strike=long_strike,
+            credit_received=credit,
+            spread_width=spread_width,
+            expiration_date=expiration,
+            contracts=contracts,
+        )
+
+        if ok:
+            max_loss = round((spread_width - credit) * 100 * contracts, 2)
+            await update.message.reply_text(
+                f"✅ *פוזיציה נוספה!*\n\n"
+                f"📌 {ticker} — {strategy}\n"
+                f"💰 Credit: `${credit}` | Spread: `${spread_width}`\n"
+                f"📅 פקיעה: `{expiration}`\n"
+                f"📦 חוזים: `{contracts}`\n"
+                f"⚠️ Max Loss: `${max_loss}`\n\n"
+                f"🤖 Agent 3 יתחיל לעקוב מהשעה הבאה.",
+                parse_mode="Markdown",
+            )
+        else:
+            await update.message.reply_text("⚠️ שגיאה בהוספת הפוזיציה.")
+
+    except (ValueError, IndexError) as e:
+        await update.message.reply_text(f"⚠️ שגיאה בפרמטרים: {e}\nבדוק את הפורמט.")
+
+
+async def closeposition_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /closeposition — Mark a position as closed.
+    Usage: /closeposition TICKER CLOSE_PRICE
+    Example: /closeposition AAPL 0.82
+    """
+    if not _is_authorized(update):
+        return
+    try:
+        args = context.args
+        if not args or len(args) < 2:
+            await update.message.reply_text(
+                "📝 *שימוש:*\n"
+                "`/closeposition TICKER CLOSE_PRICE`\n\n"
+                "*דוגמה:*\n"
+                "`/closeposition AAPL 0.82`",
+                parse_mode="Markdown",
+            )
+            return
+
+        ticker      = args[0].upper()
+        close_price = float(args[1])
+
+        from app.agent.risk_manager_agent import RiskManagerAgent
+        ok = RiskManagerAgent.close_position(ticker, close_price)
+
+        if ok:
+            await update.message.reply_text(
+                f"✅ *פוזיציה נסגרה!*\n\n"
+                f"📌 {ticker} סומנה כסגורה במחיר `${close_price}`\n"
+                f"Agent 3 הפסיק לעקוב.",
+                parse_mode="Markdown",
+            )
+        else:
+            await update.message.reply_text(f"⚠️ לא נמצאה פוזיציה פתוחה ל-{ticker}.")
+
+    except (ValueError, IndexError) as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
+async def riskcheck_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/riskcheck — Manually trigger Agent 3 risk check right now."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text("🕵️ מריץ בדיקת סיכונים על כל הפוזיציות...")
+    try:
+        from app.agent.risk_manager_agent import RiskManagerAgent
+        result = await asyncio.to_thread(lambda: RiskManagerAgent().run())
+        await update.message.reply_text(
+            f"✅ בדיקה הושלמה.\n"
+            f"📋 פוזיציות שנבדקו: `{result['checked']}`\n"
+            f"🔔 התראות שנשלחו: `{result['alerts_sent']}`"
+        )
+    except Exception as e:
+        logger.exception("riskcheck_command failed")
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
+async def orchestrator_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/status — Show orchestrator health: all 3 agents, run history, schedule."""
+    if not _is_authorized(update):
+        return
+    try:
+        from run_agent import _orchestrator
+        if _orchestrator is None:
+            await update.message.reply_text(
+                "⚠️ Orchestrator לא אותחל עדיין (daemon mode לא פעיל)."
+            )
+            return
+        status_text = await asyncio.to_thread(_orchestrator.get_status)
+        await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.exception("orchestrator_status_command failed")
+        await update.message.reply_text(f"⚠️ שגיאה בשליפת סטטוס: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1529,7 +1711,8 @@ def build_app() -> Application:
     # ── Core ──────────────────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",        cmd_start))
     app.add_handler(CommandHandler("help",         cmd_help))
-    app.add_handler(CommandHandler("status",       cmd_status))
+    app.add_handler(CommandHandler("status",       orchestrator_status_command))
+    app.add_handler(CommandHandler("market",       cmd_status))
     app.add_handler(CommandHandler("options",      cmd_options_0dte))
     app.add_handler(CommandHandler("scan",         cmd_scan))
 
@@ -1551,7 +1734,19 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("otc",          cmd_otc_scan))
     app.add_handler(CommandHandler("train",        cmd_train_model))
     app.add_handler(CommandHandler("leaderboard",  cmd_leaderboard))
-    app.add_handler(CommandHandler("regime",       cmd_regime))
+    app.add_handler(CommandHandler("regime",        cmd_regime))
+    app.add_handler(CommandHandler("strategist",   cmd_strategist))
+
+    # ── Agent 3 — Position tracking & risk management ─────────────────────────
+    app.add_handler(CommandHandler("positions",    positions_command))
+    app.add_handler(CommandHandler("addposition",  addposition_command))
+    app.add_handler(CommandHandler("closeposition", closeposition_command))
+    app.add_handler(CommandHandler("riskcheck",    riskcheck_command))
+
+    # ── Free chat — MUST be registered LAST so it doesn't shadow /commands ────
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, free_chat_handler)
+    )
     _app = app
     return app
 
