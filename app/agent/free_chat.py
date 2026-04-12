@@ -150,26 +150,39 @@ class FreeChatHandler:
         await update.message.chat.send_action(ChatAction.TYPING)
         self._memory.add(user_id, "user", text)
 
-        # Check if question needs real-time data → enrich with Perplexity
-        perplexity_context = ""
+        # Enrich with real-time data if needed
+        realtime_context = ""
+
         if _needs_realtime_data(text):
+            # Try Perplexity first (real-time web)
             try:
                 from app.services.perplexity_service import PerplexityService
                 pplx = PerplexityService()
                 if pplx.is_available():
                     answer = pplx.ask(text)
                     if answer:
-                        perplexity_context = f"\n\n[Real-time data from Perplexity]:\n{answer}"
-                        logger.info("Perplexity enriched free chat response")
+                        realtime_context = f"\n\n[Real-time web data - Perplexity]:\n{answer}"
+                        logger.info("Perplexity enriched response")
             except Exception as e:
                 logger.warning("Perplexity enrichment failed: %s", e)
 
-        # Build messages with optional Perplexity context injected into last user turn
+            # Fallback to OpenAI if Perplexity didn't help
+            if not realtime_context:
+                try:
+                    from app.services.openai_sentiment import get_quick_fact
+                    answer = get_quick_fact(text)
+                    if answer:
+                        realtime_context = f"\n\n[Quick facts - OpenAI]:\n{answer}"
+                        logger.info("OpenAI fallback enriched response")
+                except Exception as e:
+                    logger.warning("OpenAI fallback failed: %s", e)
+
+        # Build messages with optional real-time context injected into last user turn
         messages = self._memory.get(user_id)
-        if perplexity_context:
+        if realtime_context:
             messages = messages[:-1] + [{
                 "role": "user",
-                "content": text + perplexity_context,
+                "content": text + realtime_context,
             }]
 
         try:

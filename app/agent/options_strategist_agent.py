@@ -49,6 +49,7 @@ from app.services.realtime_market_data import (
     find_strike_by_delta,
     scan_for_high_iv_tickers,
 )
+from app.services.openai_sentiment import score_tickers_batch
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,9 @@ class TradeIdea:
     liquidity_ok: bool
     earnings_safe: bool     # no earnings inside DTE window
     perplexity_news_ok: bool = True
+    sentiment_score: Optional[float] = None
+    sentiment_label: str = "neutral"
+    sentiment_reason: str = ""
 
 
 @dataclass
@@ -431,6 +435,12 @@ def _build_trade_card(idea: TradeIdea, rank: int) -> str:
         if idea.xgb_confidence is not None else "N/A"
     )
 
+    if idea.sentiment_score is not None:
+        sent_emoji = "🟢" if idea.sentiment_label == "bullish" else ("🔴" if idea.sentiment_label == "bearish" else "🟡")
+        sent_line = f"\n{sent_emoji} OpenAI Sentiment: `{idea.sentiment_score:.1f}/10` — {idea.sentiment_reason}"
+    else:
+        sent_line = ""
+
     if idea.strategy == "Iron Condor":
         call_short = round(idea.current_price + idea.expected_move * 1.05)
         call_long = call_short + 5
@@ -464,7 +474,7 @@ def _build_trade_card(idea: TradeIdea, rank: int) -> str:
         f"• Probability OTM: `{idea.probability_otm}%`\n"
         f"• Return on Risk: `{idea.return_on_risk}%`\n"
         f"\n"
-        f"🤖 XGBoost Confidence: {xgb_str}\n"
+        f"🤖 XGBoost Confidence: {xgb_str}{sent_line}\n"
         f"📐 {idea.sizing_note}{earnings_warn}"
     )
 
@@ -588,6 +598,32 @@ class OptionsStrategistAgent:
 
         logger.info("After cooldown filter: %d candidates", len(filtered))
 
+        # 4b. OpenAI batch sentiment pre-filter
+        logger.info("Running OpenAI sentiment scoring on %d candidates...", len(filtered))
+        all_candidate_tickers = [t for _, t, _ in filtered]
+        sentiment_map = score_tickers_batch(all_candidate_tickers)
+
+        pre_filtered = []
+        for conf, ticker, direction in filtered:
+            sent = sentiment_map.get(ticker)
+            if sent and sent.risk_flag:
+                logger.info("SKIP %s — OpenAI risk flag: %s", ticker, sent.reason)
+                continue
+            if sent:
+                if direction == "bullish" and sent.sentiment_label == "bearish" and sent.confidence > 0.8:
+                    logger.info("SKIP %s — OpenAI sentiment bearish vs bullish direction", ticker)
+                    continue
+                if direction == "bearish" and sent.sentiment_label == "bullish" and sent.confidence > 0.8:
+                    logger.info("SKIP %s — OpenAI sentiment bullish vs bearish direction", ticker)
+                    continue
+            pre_filtered.append((conf, ticker, direction))
+
+        logger.info(
+            "After OpenAI filter: %d/%d candidates remain",
+            len(pre_filtered), len(filtered),
+        )
+        filtered = pre_filtered
+
         # 5 & 6. Per-ticker 7-step selection → collect top FINAL_TOP_N
         trade_ideas: list[TradeIdea] = []
         for conf, ticker, direction in filtered:
@@ -607,6 +643,12 @@ class OptionsStrategistAgent:
                 if not idea.earnings_safe:
                     logger.info("SKIP %s — earnings inside DTE window", ticker)
                     continue
+                # Attach OpenAI sentiment to the trade card
+                if ticker in sentiment_map:
+                    sent = sentiment_map[ticker]
+                    idea.sentiment_score = sent.sentiment_score
+                    idea.sentiment_label = sent.sentiment_label
+                    idea.sentiment_reason = sent.reason
                 trade_ideas.append(idea)
                 logger.info(
                     "ACCEPTED %s: %s | IV_R=%.1f | IV_P=%.1f | Credit=$%.2f | P(OTM)=%.1f%%",
