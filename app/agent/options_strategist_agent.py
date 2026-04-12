@@ -43,6 +43,13 @@ from typing import Optional
 
 import yfinance as yf
 
+from app.services.realtime_market_data import (
+    get_realtime_iv_data,
+    get_options_chain,
+    find_strike_by_delta,
+    scan_for_high_iv_tickers,
+)
+
 logger = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -282,81 +289,98 @@ def _select_strategy(direction: str, iv_rank: float) -> str:
 def _build_trade_idea(
     ticker: str,
     direction: str,
-    iv_rank: float,
-    iv_pct: float,
     xgb_confidence: Optional[float],
     sizing_multiplier: float,
 ) -> Optional[TradeIdea]:
     """
-    Run the 7-step selection on a single ticker.
+    Run the 7-step selection on a single ticker using REAL market data.
     Returns TradeIdea or None if ticker fails any filter.
     """
-    # Step 1: Liquidity
-    liquidity_ok = _check_liquidity(ticker)
-    if not liquidity_ok:
-        logger.info("SKIP %s — liquidity check failed", ticker)
+    # Get REAL IV data from yfinance options chain
+    iv_data = get_realtime_iv_data(ticker)
+
+    # Step 1: Liquidity check
+    if not iv_data.is_liquid:
+        logger.info("SKIP %s — bid-ask spread %.1f%% > 10%%", ticker, iv_data.bid_ask_spread_pct)
         return None
 
-    # Step 3: IV Rank minimum
-    if iv_rank < MIN_IV_RANK:
-        logger.info("SKIP %s — IV Rank %.1f < %d", ticker, iv_rank, MIN_IV_RANK)
-        return None
-
-    # Step 4: IV Percentile dual confirmation
-    if iv_pct < MIN_IV_PCT:
-        logger.info("SKIP %s — IV Percentile %.1f < %d", ticker, iv_pct, MIN_IV_PCT)
-        return None
-
-    # Get current price
-    price = _get_current_price(ticker)
-    if not price:
+    if iv_data.current_price <= 0:
         logger.info("SKIP %s — could not get price", ticker)
         return None
 
-    # Step 5: Expected move
-    dte = 38  # mid-point of 30-45 DTE sweet spot
-    em = _calc_expected_move(price, iv_rank, dte)
+    # Step 3: IV Rank minimum
+    if iv_data.iv_rank < MIN_IV_RANK:
+        logger.info("SKIP %s — IV Rank %.1f < %d", ticker, iv_data.iv_rank, MIN_IV_RANK)
+        return None
+
+    # Step 4: IV Percentile dual confirmation
+    if iv_data.iv_percentile < MIN_IV_PCT:
+        logger.info("SKIP %s — IV Percentile %.1f < %d", ticker, iv_data.iv_percentile, MIN_IV_PCT)
+        return None
+
+    # Step 5: Expected move (REAL, from yfinance IV)
+    dte = 38  # target 30-45 DTE sweet spot
+    em = iv_data.expected_move_30d if iv_data.expected_move_30d > 0 else (
+        iv_data.current_price * (iv_data.iv_current / 100) * math.sqrt(dte / 365)
+    )
+    em = round(em, 2)
 
     # Step 6: Strategy selection
-    strategy = _select_strategy(direction, iv_rank)
+    strategy = _select_strategy(direction, iv_data.iv_rank)
     if strategy == "Skip":
         return None
 
-    # Step 7: Strike selection — place short strike just outside 1SD (×1.05)
-    spread_width = 5.0  # standard $5-wide spread
+    # Step 7: REAL strike selection from options chain
+    chain = get_options_chain(ticker, target_dte=dte)
 
-    if strategy == "Bull Put Spread":
-        short_strike = round(price - em * 1.05, 0)
-        long_strike = short_strike - spread_width
-        short_delta = 0.17
-    elif strategy == "Bear Call Spread":
-        short_strike = round(price + em * 1.05, 0)
-        long_strike = short_strike + spread_width
-        short_delta = 0.17
-    else:  # Iron Condor — put side drives the primary display
-        short_strike = round(price - em * 1.05, 0)
-        long_strike = short_strike - spread_width
-        short_delta = 0.17
+    if chain:
+        actual_dte = chain.dte
+        expiration = chain.expiration
+        if strategy == "Bull Put Spread":
+            short_strike = find_strike_by_delta(chain, target_delta=0.20, option_type="put")
+        elif strategy == "Bear Call Spread":
+            short_strike = find_strike_by_delta(chain, target_delta=0.20, option_type="call")
+        else:  # Iron Condor — use put side as primary
+            short_strike = find_strike_by_delta(chain, target_delta=0.20, option_type="put")
+    else:
+        # Fallback: estimate strike from expected move
+        actual_dte = dte
+        expiration = "N/A"
+        short_strike = None
 
-    # Credit estimation: ~30% of spread width, bonus for elevated IV
-    iv_bonus = 1.0 + max(0, (iv_rank - 35) / 100)
-    credit = round(spread_width * 0.30 * iv_bonus, 2)
+    # If no real strike found, estimate
+    if short_strike is None:
+        if strategy == "Bull Put Spread":
+            short_strike = round(iv_data.current_price - em * 1.05, 0)
+        elif strategy == "Bear Call Spread":
+            short_strike = round(iv_data.current_price + em * 1.05, 0)
+        else:
+            short_strike = round(iv_data.current_price - em * 1.05, 0)
+
+    spread_width = 5.0  # standard $5 wide spread
+    long_strike = short_strike - spread_width if "Put" in strategy else short_strike + spread_width
+    short_delta = 0.20
+
+    # Credit: real estimate from IV (higher IV = more credit)
+    iv_factor = min(iv_data.iv_current / 25.0, 2.5)  # normalize to ~25% base IV
+    credit = round(spread_width * 0.30 * iv_factor, 2)
     if strategy == "Iron Condor":
-        credit = round(credit * 2 * 0.85, 2)  # both sides, slight discount
+        credit = round(credit * 1.8, 2)  # both sides
 
     max_loss = round((spread_width - credit) * 100, 2)
     probability_otm = round((1 - short_delta) * 100, 1)
-    ror = round(credit / (spread_width - credit) * 100, 1)
+    ror = round(credit / (spread_width - credit) * 100, 1) if (spread_width - credit) > 0 else 0
 
     # Sizing note
-    pct_low = round(3 * sizing_multiplier, 1)
-    pct_high = round(5 * sizing_multiplier, 1)
-    sizing_note = f"סיזינג: {pct_low}%-{pct_high}% מהחשבון"
+    pct_low = 3 * sizing_multiplier
+    pct_high = 5 * sizing_multiplier
+    sizing_note = f"סיזינג: {pct_low:.1f}%-{pct_high:.1f}% מהחשבון"
 
-    earnings_safe = _check_earnings_safe(ticker, dte)
+    # Earnings check
+    earnings_safe = _check_earnings_safe(ticker, actual_dte)
 
-    # Perplexity real-time news check
-    news_safe, news_risk = _check_ticker_news(ticker)
+    # Perplexity news check
+    news_safe, _ = _check_ticker_news(ticker)
     if not news_safe:
         logger.info("SKIP %s — Perplexity flagged negative news", ticker)
         return None
@@ -365,11 +389,11 @@ def _build_trade_idea(
         ticker=ticker,
         strategy=strategy,
         direction=direction,
-        current_price=price,
-        iv_rank=iv_rank,
-        iv_percentile=iv_pct,
+        current_price=iv_data.current_price,
+        iv_rank=iv_data.iv_rank,
+        iv_percentile=iv_data.iv_percentile,
         expected_move=em,
-        dte=dte,
+        dte=actual_dte,
         short_strike=short_strike,
         long_strike=long_strike,
         short_delta=short_delta,
@@ -380,9 +404,8 @@ def _build_trade_idea(
         return_on_risk=ror,
         xgb_confidence=xgb_confidence,
         sizing_note=sizing_note,
-        liquidity_ok=liquidity_ok,
+        liquidity_ok=iv_data.is_liquid,
         earnings_safe=earnings_safe,
-        perplexity_news_ok=news_safe,
     )
 
 
@@ -572,30 +595,24 @@ class OptionsStrategistAgent:
                 break
 
             logger.info("Evaluating %s (%s, XGB=%.1f)...", ticker, direction, conf)
-            iv_rank, iv_pct = _get_iv_rank(ticker)
 
             idea = _build_trade_idea(
                 ticker=ticker,
                 direction=direction,
-                iv_rank=iv_rank,
-                iv_pct=iv_pct,
                 xgb_confidence=conf if conf > 0 else None,
                 sizing_multiplier=sizing_multiplier,
             )
 
-            if idea is None:
-                continue
-
-            if not idea.earnings_safe:
-                logger.info("SKIP %s — earnings inside DTE window", ticker)
-                continue
-
-            trade_ideas.append(idea)
-            logger.info(
-                "ACCEPTED %s: %s | IV_R=%.1f | IV_P=%.1f | Credit=$%.2f | P(OTM)=%.1f%%",
-                ticker, idea.strategy, iv_rank, iv_pct,
-                idea.credit, idea.probability_otm,
-            )
+            if idea:
+                if not idea.earnings_safe:
+                    logger.info("SKIP %s — earnings inside DTE window", ticker)
+                    continue
+                trade_ideas.append(idea)
+                logger.info(
+                    "ACCEPTED %s: %s | IV_R=%.1f | IV_P=%.1f | Credit=$%.2f | P(OTM)=%.1f%%",
+                    ticker, idea.strategy, idea.iv_rank, idea.iv_percentile,
+                    idea.credit, idea.probability_otm,
+                )
 
         candidates_passed = len(trade_ideas)
 
