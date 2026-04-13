@@ -127,6 +127,16 @@ NEVER:
 - Give generic answers when specific data is available
 - Recommend Naked options without warning about unlimited risk
 - Recommend any trade without first checking IV Rank
+
+---
+
+CRITICAL FORMATTING RULES:
+- NEVER output XML tags like <usemcptool>, <servername>, <arguments> etc.
+- NEVER show internal tool calls or raw data structures to the user
+- You have Python functions that fetch data for you automatically — use them silently
+- Always respond in clean, formatted Hebrew text only
+- If data was fetched for you in [Context data], use it directly — do not call external tools
+- Format responses with emojis and bullet points, never with XML or JSON
 """)
 
     return "".join(parts)
@@ -371,7 +381,8 @@ def _detect_intent(text: str) -> list[str]:
     intents = []
 
     stock_keywords = ['iv', 'אופציה', 'מניה', 'מחיר', 'spread', 'strike',
-                      'delta', 'condor', 'put', 'call', 'עסקה', 'טרייד']
+                      'delta', 'condor', 'put', 'call', 'עסקה', 'טרייד',
+                      'נסרוק', 'בדוק', 'תבדוק', 'analyze', 'ניתוח']
     if any(k in text_lower for k in stock_keywords):
         intents.append("stock_data")
 
@@ -394,12 +405,15 @@ def _detect_intent(text: str) -> list[str]:
     if any(k in text_lower for k in sentiment_keywords):
         intents.append("sentiment")
 
-    scan_keywords = ['סריקה', 'scan', 'finviz', 'מועמדים', 'candidates']
+    scan_keywords = ['סריקה', 'scan', 'finviz', 'מועמדים', 'candidates',
+                     'רשימה', 'מניות', 'חפש', 'מצא', 'stocks', 'screener',
+                     'high iv', 'iv rank']
     if any(k in text_lower for k in scan_keywords):
-        intents.append("finviz")
+        intents.append("scan")
 
     realtime_keywords = ['היום', 'עכשיו', 'חדשות', 'news', 'פד', 'fed',
-                         'אמר', 'הודיע', 'earnings', 'דוחות', 'breaking']
+                         'אמר', 'הודיע', 'earnings', 'דוחות', 'breaking',
+                         'finviz', 'בחוץ', 'מהאינטרנט', 'חפש באינטרנט', 'search']
     if any(k in text_lower for k in realtime_keywords):
         intents.append("realtime")
 
@@ -439,10 +453,14 @@ async def _build_context(text: str) -> str:
         if sent:
             context_parts.append(sent)
 
-    if "finviz" in intents:
+    if "finviz" in intents or "scan" in intents:
         fvz = _fetch_finviz_candidates()
         if fvz:
             context_parts.append(fvz)
+        # Also fetch market sentiment when scanning
+        sent = _fetch_market_sentiment()
+        if sent:
+            context_parts.append(sent)
 
     if "realtime" in intents:
         pplx = _fetch_perplexity(text)
