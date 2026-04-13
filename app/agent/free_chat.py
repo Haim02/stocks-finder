@@ -1,17 +1,24 @@
 """
-free_chat.py — Free Conversation Handler for Telegram Bot
-==========================================================
+free_chat.py — Intelligent Free Chat Handler
+=============================================
 
-Replaces rigid /commands with natural Hebrew conversation powered by Claude.
-Reads MEMORY.md and CLAUDE.md as system prompt so the agent always knows
-who Haim is, the trading rules, and the project context.
+Powers natural Hebrew conversation with Claude.
+Feels like talking to Claude/ChatGPT — not a bot.
 
-Features:
-- Natural Hebrew conversation with Claude (claude-sonnet-4-5)
-- Per-user conversation history (last 20 messages, rolling window)
-- /learn <text> → summarizes and appends to MEMORY.md
-- /reset → clears conversation history
-- Smart scan intent detection → redirects to /scan command
+Data access:
+- MEMORY.md / CLAUDE.md (identity + trading knowledge)
+- MongoDB (positions, strategies, sentiment, training data)
+- yfinance (real-time IV, options chain, stock prices)
+- Finviz (screener candidates)
+- Perplexity (real-time web search)
+- OpenAI (quick facts fallback)
+- XGBoost model (confidence scores)
+- Agent 1 reports (market regime)
+- Agent 2 reports (options ideas)
+
+Commands still supported:
+/learn <text>  → append to MEMORY.md
+/reset         → clear conversation history
 """
 
 import logging
@@ -19,6 +26,8 @@ import os
 import re
 from pathlib import Path
 from collections import deque
+from datetime import datetime, timedelta
+from typing import Optional
 
 import anthropic
 from telegram import Update
@@ -28,49 +37,423 @@ from telegram.constants import ChatAction
 logger = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-CLAUDE_MODEL  = "claude-sonnet-4-5"
-MAX_HISTORY   = 20
-MAX_TOKENS    = 1024
+CLAUDE_MODEL    = "claude-sonnet-4-5"
+MAX_HISTORY     = 30           # longer memory = more natural conversation
+MAX_TOKENS      = 2048         # longer responses = more thorough answers
+_ROOT           = Path(__file__).parent.parent.parent
+MEMORY_PATH     = _ROOT / "MEMORY.md"
+CLAUDE_PATH     = _ROOT / "CLAUDE.md"
 
-# Paths — go up from app/agent/ to project root
-_ROOT        = Path(__file__).parent.parent.parent
-MEMORY_PATH  = _ROOT / "MEMORY.md"
-CLAUDE_PATH  = _ROOT / "CLAUDE.md"
-
-SCAN_INTENTS = [
-    "תריץ סריקה", "תעשה סריקה", "סרוק", "run scan",
-    "תריץ אופציות", "תשלח דוח", "תפעיל",
-]
+# Tickers to skip when extracting from text
+_SKIP_WORDS = {
+    'IV', 'DTE', 'ATM', 'OTM', 'ITM', 'PUT', 'CALL', 'VIX', 'RSI',
+    'SMA', 'EMA', 'CSP', 'CC', 'AI', 'OK', 'US', 'API', 'ETF',
+    'P&L', 'ROI', 'ROC', 'EPS', 'PE', 'MA', 'BB', 'OR', 'IF',
+    'AND', 'THE', 'FOR', 'ARE', 'NOT', 'ALL', 'IB', 'TA',
+    'RANK', 'SPY', 'QQQ', 'SPX', 'NDX', 'CEO', 'SEC', 'FDA', 'IPO',
+    'TELL', 'WHAT', 'WHEN', 'HOW', 'WHY', 'CAN', 'WILL', 'HAS',
+    'STOCK', 'ABOUT', 'FROM', 'WITH', 'THIS', 'THAT', 'JUST',
+    'LONG', 'SHORT', 'HIGH', 'LOW', 'OPEN', 'CLOSE', 'GOOD',
+    'BEST', 'NEXT', 'LAST', 'WEEK', 'DAY', 'NOW', 'GET', 'SET',
+    'ME', 'IS', 'IT', 'IN', 'ON', 'AT', 'BY', 'OF', 'TO',
+    'UP', 'AN', 'AS', 'DO', 'GO', 'BE', 'NO', 'SO', 'WE', 'MY',
+    'HE', 'IM', 'ITS',
+}
 
 
 # ── System Prompt ─────────────────────────────────────────────────────────────
 
 def _build_system_prompt() -> str:
+    """Build the full system prompt from CLAUDE.md + MEMORY.md."""
     parts = []
+
     if CLAUDE_PATH.exists():
         parts.append(CLAUDE_PATH.read_text(encoding="utf-8"))
     else:
         parts.append(
-            "You are an autonomous options trading AI agent for Haim. "
+            "You are an autonomous options trading AI agent for Haim (חיים). "
             "Always respond in Hebrew. Financial terms stay in English."
         )
+
     if MEMORY_PATH.exists():
         parts.append("\n\n---\n\n## FULL MEMORY\n\n")
         parts.append(MEMORY_PATH.read_text(encoding="utf-8"))
 
-    parts.append(
-        "\n\n---\n\n"
-        "## CONVERSATION RULES\n"
-        "- Always respond in Hebrew\n"
-        "- Financial/technical terms stay in English (IV, Delta, Strike, DTE, etc.)\n"
-        "- Be direct and analytical — numbers first, no fluff\n"
-        "- Address the user as חיים\n"
-        "- Keep answers concise for Telegram — bullet points, not walls of text\n"
-        "- Use emojis sparingly (📊 for data, ⚠️ for risk, ✅ for confirmation)\n"
-        "- Never suggest Naked options (undefined risk)\n"
-        "- Always back recommendations with IV Rank + Trend data\n"
-    )
+    parts.append("""
+
+---
+
+## HOW TO BEHAVE IN CONVERSATION
+
+You are Haim's personal trading AI. Talk naturally like Claude or ChatGPT — not like a bot.
+
+PERSONALITY:
+- Direct, analytical, warm when needed
+- Proactively share insights without being asked
+- If you notice something important in the data, mention it
+- Use dry humor occasionally — Haim appreciates it
+- Never say "I don't have access to that data" — you have tools to fetch it
+
+LANGUAGE:
+- Always respond in Hebrew
+- Keep financial/technical terms in English: IV, Delta, Strike, DTE, Call, Put, etc.
+- Use bullet points for lists, but write naturally for explanations
+- Keep Telegram-friendly formatting (avoid long walls of text)
+
+WHEN ASKED ABOUT A STOCK:
+- Automatically fetch real IV data and provide full analysis
+- State: current price, IV Rank, IV Percentile, expected move, recommended strategy
+- Always include: DTE recommendation, strike range, management rules
+- If earnings upcoming: WARN immediately
+
+WHEN ASKED ABOUT POSITIONS:
+- Pull from MongoDB and give status of each open position
+- Calculate: current profit/loss, DTE remaining, alert if near management thresholds
+
+WHEN ASKED ABOUT THE MARKET TODAY:
+- Pull latest Agent 1 regime report from MongoDB
+- Summarize: verdict, VIX, SPY trend, key macro factors
+
+WHEN ASKED FOR TRADE IDEAS:
+- Pull latest Agent 2 report from MongoDB
+- Present the top ideas with full details
+
+WHEN ASKED GENERAL OPTIONS QUESTIONS:
+- Answer from your deep knowledge in MEMORY.md
+- Give concrete examples with numbers, not just theory
+
+NEVER:
+- Say you can't access real-time data (you can via your tools)
+- Give generic answers when specific data is available
+- Recommend Naked options without warning about unlimited risk
+- Recommend any trade without first checking IV Rank
+""")
+
     return "".join(parts)
+
+
+# ── Data Fetchers ─────────────────────────────────────────────────────────────
+
+def _extract_ticker(text: str) -> Optional[str]:
+    """Extract the most likely stock ticker from user message."""
+    patterns = [
+        r'\$([A-Z]{1,5})\b',
+        r'\b([A-Z]{2,5})\b',
+    ]
+    for pattern in patterns:
+        for m in re.findall(pattern, text.upper()):
+            if m not in _SKIP_WORDS and 2 <= len(m) <= 5:
+                return m
+    return None
+
+
+def _fetch_stock_data(ticker: str) -> str:
+    """Fetch comprehensive real-time data for a stock ticker."""
+    results = []
+
+    # 1. Real IV data from yfinance
+    try:
+        from app.services.realtime_market_data import get_realtime_iv_data
+        iv = get_realtime_iv_data(ticker)
+        if iv.current_price > 0:
+            iv_signal = (
+                "🔥 גבוה" if iv.iv_rank >= 50
+                else ("✅ בינוני-גבוה" if iv.iv_rank >= 35
+                      else ("⚠️ בינוני" if iv.iv_rank >= 20 else "❌ נמוך"))
+            )
+            if iv.iv_rank >= 50:
+                strategy = "מכור פרמיה → Iron Condor / Bull Put Spread"
+            elif iv.iv_rank >= 35:
+                strategy = "Credit Spreads מוגדרי סיכון"
+            elif iv.iv_rank >= 25:
+                strategy = "Bull Put Spread בזהירות"
+            else:
+                strategy = "IV נמוך מדי לאסטרטגיות מכירה → שקול Debit Spread או LEAPs"
+
+            results.append(
+                f"[נתוני שוק אמיתיים — {ticker}]\n"
+                f"מחיר: ${iv.current_price}\n"
+                f"IV נוכחי: {iv.iv_current}%\n"
+                f"IV Rank: {iv.iv_rank}/100 {iv_signal}\n"
+                f"IV Percentile: {iv.iv_percentile}/100\n"
+                f"Expected Move 30 יום: ±${iv.expected_move_30d}\n"
+                f"ATM IV (Call/Put): {iv.atm_call_iv}% / {iv.atm_put_iv}%\n"
+                f"Bid-Ask Spread: {iv.bid_ask_spread_pct}% ({'נזיל ✅' if iv.is_liquid else 'לא נזיל ⚠️'})\n"
+                f"אסטרטגיה מומלצת: {strategy}\n"
+                f"מקור: {iv.data_source}"
+            )
+    except Exception as e:
+        logger.debug("IV fetch failed for %s: %s", ticker, e)
+
+    # 2. XGBoost confidence
+    try:
+        from app.services.ml_service import predict_confidence
+        conf = predict_confidence(ticker)
+        if conf is not None:
+            results.append(f"XGBoost Confidence: {conf:.1f}% (הסתברות לעלייה ≥5% ב-10 ימים)")
+    except Exception:
+        pass
+
+    # 3. MongoDB sentiment for this ticker
+    try:
+        from app.data.mongo_client import MongoDB
+        db = MongoDB.get_db()
+        cutoff = datetime.utcnow() - timedelta(hours=48)
+        sent = db["daily_market_sentiment"].find_one(
+            {"ticker": ticker, "timestamp": {"$gte": cutoff}},
+            sort=[("timestamp", -1)],
+        )
+        if sent:
+            score = sent.get("sentiment_score", 5)
+            label = "שורי 📈" if score >= 7 else ("דובי 📉" if score <= 3 else "ניטרלי ➡️")
+            results.append(f"סנטימנט AI: {score}/10 — {label}")
+    except Exception:
+        pass
+
+    return "\n\n".join(results) if results else ""
+
+
+def _fetch_open_positions() -> str:
+    """Fetch all open positions from MongoDB."""
+    try:
+        from app.data.mongo_client import MongoDB
+        from datetime import date
+        db = MongoDB.get_db()
+        positions = list(db["open_positions"].find(
+            {"status": {"$nin": ["closed"]}},
+            sort=[("opened_at", -1)],
+        ))
+        if not positions:
+            return "[פוזיציות פתוחות: אין כרגע]"
+
+        lines = [f"[פוזיציות פתוחות ({len(positions)})]"]
+        for p in positions:
+            exp = p.get("expiration_date", "")
+            try:
+                dte = (date.fromisoformat(exp) - date.today()).days
+            except Exception:
+                dte = "?"
+            credit = float(p.get("credit_received", 0))
+            lines.append(
+                f"• {p['ticker']} — {p['strategy']}\n"
+                f"  Strike: ${p.get('short_strike')} | Credit: ${credit} | "
+                f"Exp: {exp} ({dte} DTE) | Status: {p.get('status')}"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        logger.debug("Positions fetch failed: %s", e)
+        return ""
+
+
+def _fetch_latest_regime() -> str:
+    """Fetch the latest Agent 1 regime report."""
+    try:
+        from app.data.mongo_client import MongoDB
+        db = MongoDB.get_db()
+        doc = db["market_regime_reports"].find_one(sort=[("timestamp", -1)])
+        if not doc:
+            return "[Regime: אין דוח עדיין — הרץ /regime]"
+        verdict = doc.get("verdict", "?")
+        vix = doc.get("vix", "?")
+        trend = doc.get("spy_trend", "?")
+        iv_rank = doc.get("iv_rank", "?")
+        ts = doc.get("timestamp", "")[:16].replace("T", " ")
+        emoji = {"GREEN": "🟢", "YELLOW": "🟡", "RED": "🔴"}.get(verdict, "⚪")
+        return (
+            f"[Regime Report — {ts}]\n"
+            f"{emoji} ורדיקט: {verdict} | VIX: {vix} | "
+            f"SPY: {trend} | IV Rank: {iv_rank}%"
+        )
+    except Exception:
+        return ""
+
+
+def _fetch_latest_trade_ideas() -> str:
+    """Fetch today's trade ideas from Agent 2."""
+    try:
+        from app.data.mongo_client import MongoDB
+        db = MongoDB.get_db()
+        doc = db["options_strategist_reports"].find_one(sort=[("timestamp", -1)])
+        if not doc:
+            return "[עסקאות: אין המלצות עדיין — הרץ /strategist]"
+        ideas = doc.get("trade_ideas", [])
+        if not ideas:
+            return "[עסקאות: לא נמצאו הזדמנויות היום]"
+        ts = doc.get("timestamp", "")[:16].replace("T", " ")
+        lines = [f"[המלצות אחרונות — {ts}]"]
+        for i, idea in enumerate(ideas[:3], 1):
+            lines.append(
+                f"{i}. {idea.get('ticker')} — {idea.get('strategy')} | "
+                f"Strike: ${idea.get('short_strike')} | "
+                f"Credit: ${idea.get('credit')} | "
+                f"P(OTM): {idea.get('probability_otm')}%"
+            )
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
+def _fetch_finviz_candidates() -> str:
+    """Fetch current Finviz screener candidates."""
+    try:
+        from app.services.finviz_service import FinvizService
+        bullish = FinvizService.get_bullish_tickers(n=5)
+        bearish = FinvizService.get_bearish_tickers(n=5)
+        parts = []
+        if bullish:
+            parts.append(f"Finviz שורי: {', '.join(bullish[:5])}")
+        if bearish:
+            parts.append(f"Finviz דובי: {', '.join(bearish[:5])}")
+        return "\n".join(parts) if parts else ""
+    except Exception:
+        return ""
+
+
+def _fetch_market_sentiment() -> str:
+    """Fetch average market sentiment from MongoDB."""
+    try:
+        from app.data.mongo_client import MongoDB
+        db = MongoDB.get_db()
+        cutoff = datetime.utcnow() - timedelta(hours=24)
+        docs = list(db["daily_market_sentiment"].find(
+            {"timestamp": {"$gte": cutoff}},
+            {"sentiment_score": 1, "ticker": 1},
+        ))
+        if not docs:
+            return ""
+        scores = [d["sentiment_score"] for d in docs if "sentiment_score" in d]
+        if not scores:
+            return ""
+        avg = sum(scores) / len(scores)
+        label = "שורי 📈" if avg >= 6.5 else ("דובי 📉" if avg <= 4 else "ניטרלי ➡️")
+        top = sorted(docs, key=lambda x: x.get("sentiment_score", 5), reverse=True)[:3]
+        top_tickers = [d.get("ticker", "?") for d in top]
+        return (
+            f"[סנטימנט שוק — 24 שעות אחרונות]\n"
+            f"ממוצע: {avg:.1f}/10 — {label}\n"
+            f"מניות עם סנטימנט גבוה: {', '.join(top_tickers)}"
+        )
+    except Exception:
+        return ""
+
+
+def _fetch_perplexity(question: str) -> str:
+    """Fetch real-time answer from Perplexity."""
+    try:
+        from app.services.perplexity_service import PerplexityService
+        svc = PerplexityService()
+        if svc.is_available():
+            answer = svc.ask(question)
+            if answer:
+                return f"[Perplexity — נתונים בזמן אמת]\n{answer}"
+    except Exception:
+        pass
+    return ""
+
+
+def _fetch_openai_fact(question: str) -> str:
+    """Fetch quick fact from OpenAI as fallback."""
+    try:
+        from app.services.openai_sentiment import get_quick_fact
+        answer = get_quick_fact(question)
+        if answer:
+            return f"[OpenAI]\n{answer}"
+    except Exception:
+        pass
+    return ""
+
+
+# ── Intent Detection ──────────────────────────────────────────────────────────
+
+def _detect_intent(text: str) -> list[str]:
+    """Detect what data the user needs. Returns list of intent tags."""
+    text_lower = text.lower()
+    intents = []
+
+    stock_keywords = ['iv', 'אופציה', 'מניה', 'מחיר', 'spread', 'strike',
+                      'delta', 'condor', 'put', 'call', 'עסקה', 'טרייד']
+    if any(k in text_lower for k in stock_keywords):
+        intents.append("stock_data")
+
+    position_keywords = ['פוזיציה', 'פוזיציות', 'position', 'פתוח', 'open',
+                         'הפסד', 'רווח', 'portfolio']
+    if any(k in text_lower for k in position_keywords):
+        intents.append("positions")
+
+    regime_keywords = ['שוק', 'regime', 'vix', 'spy', 'היום', 'מצב', 'ורדיקט',
+                       'לסחור', 'market', 'trend']
+    if any(k in text_lower for k in regime_keywords):
+        intents.append("regime")
+
+    ideas_keywords = ['המלצה', 'רעיון', 'idea', 'מה לקנות', 'מה למכור',
+                      'הזדמנות', 'opportunity', 'strategist']
+    if any(k in text_lower for k in ideas_keywords):
+        intents.append("ideas")
+
+    sentiment_keywords = ['סנטימנט', 'sentiment', 'שורי', 'דובי', 'bullish', 'bearish']
+    if any(k in text_lower for k in sentiment_keywords):
+        intents.append("sentiment")
+
+    scan_keywords = ['סריקה', 'scan', 'finviz', 'מועמדים', 'candidates']
+    if any(k in text_lower for k in scan_keywords):
+        intents.append("finviz")
+
+    realtime_keywords = ['היום', 'עכשיו', 'חדשות', 'news', 'פד', 'fed',
+                         'אמר', 'הודיע', 'earnings', 'דוחות', 'breaking']
+    if any(k in text_lower for k in realtime_keywords):
+        intents.append("realtime")
+
+    return intents
+
+
+# ── Context Builder ───────────────────────────────────────────────────────────
+
+async def _build_context(text: str) -> str:
+    """Build all relevant context based on detected intents."""
+    intents = _detect_intent(text)
+    ticker = _extract_ticker(text)
+    context_parts = []
+
+    if "regime" in intents:
+        regime = _fetch_latest_regime()
+        if regime:
+            context_parts.append(regime)
+
+    if ticker and ("stock_data" in intents or ticker in text.upper()):
+        stock_ctx = _fetch_stock_data(ticker)
+        if stock_ctx:
+            context_parts.append(stock_ctx)
+
+    if "positions" in intents:
+        pos = _fetch_open_positions()
+        if pos:
+            context_parts.append(pos)
+
+    if "ideas" in intents:
+        ideas = _fetch_latest_trade_ideas()
+        if ideas:
+            context_parts.append(ideas)
+
+    if "sentiment" in intents:
+        sent = _fetch_market_sentiment()
+        if sent:
+            context_parts.append(sent)
+
+    if "finviz" in intents:
+        fvz = _fetch_finviz_candidates()
+        if fvz:
+            context_parts.append(fvz)
+
+    if "realtime" in intents:
+        pplx = _fetch_perplexity(text)
+        if pplx:
+            context_parts.append(pplx)
+        else:
+            oai = _fetch_openai_fact(text)
+            if oai:
+                context_parts.append(oai)
+
+    return "\n\n---\n\n".join(context_parts) if context_parts else ""
 
 
 # ── Conversation Memory ───────────────────────────────────────────────────────
@@ -94,24 +477,10 @@ class ConversationMemory:
 # ── Main Handler ──────────────────────────────────────────────────────────────
 
 class FreeChatHandler:
-    """
-    Handles all non-command Telegram messages as free conversation with Claude.
-
-    Add to telegram_bot.py:
-        from app.agent.free_chat import FreeChatHandler
-        _free_chat = FreeChatHandler()
-
-        async def free_chat_handler(update, context):
-            await _free_chat.handle(update, context)
-
-        # Register LAST (after all CommandHandlers):
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, free_chat_handler))
-    """
-
     def __init__(self):
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
+            raise ValueError("ANTHROPIC_API_KEY not set")
         self._client = anthropic.Anthropic(api_key=api_key)
         self._memory = ConversationMemory()
         self._system_prompt = _build_system_prompt()
@@ -119,7 +488,7 @@ class FreeChatHandler:
 
     def reload_memory(self):
         self._system_prompt = _build_system_prompt()
-        logger.info("System prompt reloaded from MEMORY.md")
+        logger.info("System prompt reloaded")
 
     async def handle(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not update.message.text:
@@ -130,99 +499,58 @@ class FreeChatHandler:
 
         if text.lower() == "/reset":
             self._memory.reset(user_id)
-            await update.message.reply_text("🔄 השיחה אופסה. נתחיל מחדש, חיים.")
+            await update.message.reply_text("🔄 שיחה אופסה. נתחיל מחדש, חיים.")
             return
 
         if text.lower().startswith("/learn"):
             await self._handle_learn(update, text)
             return
 
-        if any(kw in text.lower() for kw in SCAN_INTENTS):
-            await update.message.reply_text(
-                "📊 כדי להריץ סריקה, השתמש בפקודה /scan\n"
-                "אני אשלח לך את התוצאות ברגע שהסריקה תסתיים."
-            )
-            return
-
         await self._handle_chat(update, user_id, text)
 
     async def _handle_chat(self, update: Update, user_id: int, text: str) -> None:
+        """Main chat handler — feels like Claude/ChatGPT."""
         await update.message.chat.send_action(ChatAction.TYPING)
-        self._memory.add(user_id, "user", text)
 
-        # Enrich with real-time data if needed
-        realtime_context = ""
+        context_data = await _build_context(text)
 
-        # Auto-fetch real IV data if a ticker is mentioned
-        ticker = _extract_ticker(text)
-        if ticker:
-            stock_ctx = _fetch_stock_context(ticker)
-            if stock_ctx:
-                realtime_context += stock_ctx
-                logger.info("Auto-fetched IV data for %s", ticker)
+        user_content = text
+        if context_data:
+            user_content = f"{text}\n\n[Context data available to you]:\n{context_data}"
 
-        if _needs_realtime_data(text):
-            # Try Perplexity first (real-time web)
-            try:
-                from app.services.perplexity_service import PerplexityService
-                pplx = PerplexityService()
-                if pplx.is_available():
-                    answer = pplx.ask(text)
-                    if answer:
-                        realtime_context = f"\n\n[Real-time web data - Perplexity]:\n{answer}"
-                        logger.info("Perplexity enriched response")
-            except Exception as e:
-                logger.warning("Perplexity enrichment failed: %s", e)
-
-            # Fallback to OpenAI if Perplexity didn't help
-            if not realtime_context:
-                try:
-                    from app.services.openai_sentiment import get_quick_fact
-                    answer = get_quick_fact(text)
-                    if answer:
-                        realtime_context = f"\n\n[Quick facts - OpenAI]:\n{answer}"
-                        logger.info("OpenAI fallback enriched response")
-                except Exception as e:
-                    logger.warning("OpenAI fallback failed: %s", e)
-
-        # Build messages with optional real-time context injected into last user turn
-        messages = self._memory.get(user_id)
-        if realtime_context:
-            messages = messages[:-1] + [{
-                "role": "user",
-                "content": text + realtime_context,
-            }]
+        self._memory.add(user_id, "user", user_content)
 
         try:
             response = self._client.messages.create(
                 model=CLAUDE_MODEL,
                 max_tokens=MAX_TOKENS,
                 system=self._system_prompt,
-                messages=messages,
+                messages=self._memory.get(user_id),
             )
             reply = response.content[0].text
         except anthropic.APIError as e:
             logger.error("Claude API error: %s", e)
-            reply = "⚠️ שגיאה בחיבור ל-AI. נסה שוב בעוד רגע."
+            reply = "⚠️ שגיאה זמנית בחיבור ל-AI. נסה שוב בעוד רגע."
 
         self._memory.add(user_id, "assistant", reply)
+
         for chunk in _split_message(reply):
             await update.message.reply_text(chunk, parse_mode="Markdown")
 
     async def _handle_learn(self, update: Update, text: str) -> None:
+        """Append new knowledge to MEMORY.md."""
         content = text[len("/learn"):].strip()
 
         if not content:
             await update.message.reply_text(
-                "📚 *שימוש:* `/learn <טקסט>`\n\nהדבק את הטקסט שאתה רוצה שאלמד.",
+                "📚 *שימוש:* `/learn <טקסט>`\n\nהדבק כל מידע שאתה רוצה שאלמד.",
                 parse_mode="Markdown",
             )
             return
 
         if re.match(r"https?://", content):
             await update.message.reply_text(
-                "🔗 זיהיתי קישור. כרגע אני לא גולש לאתרים ישירות.\n"
-                "העתק את הטקסט מהמאמר והדבק אותו עם /learn"
+                "🔗 זיהיתי קישור. תעתיק את הטקסט מהדף והדבק אותו עם /learn."
             )
             return
 
@@ -230,22 +558,19 @@ class FreeChatHandler:
         try:
             resp = self._client.messages.create(
                 model=CLAUDE_MODEL,
-                max_tokens=400,
+                max_tokens=500,
                 system=(
-                    "You are a knowledge extractor for an options trading AI agent. "
-                    "Summarize the following into concise bullet points capturing "
-                    "trading insights, rules, or facts. "
-                    "Keep financial terms in English. Output in Hebrew."
+                    "Extract trading insights from the following text. "
+                    "Return dense bullet points capturing key rules, facts, or strategies. "
+                    "Financial terms in English, explanation in Hebrew."
                 ),
                 messages=[{"role": "user", "content": content}],
             )
             summary = resp.content[0].text
-        except Exception as e:
-            logger.error("Summary error: %s", e)
+        except Exception:
             summary = content
 
-        import datetime
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
         entry = f"\n\n---\n\n## 📚 נלמד ב-{timestamp}\n\n{summary}\n"
 
         try:
@@ -253,88 +578,15 @@ class FreeChatHandler:
                 f.write(entry)
             self.reload_memory()
             await update.message.reply_text(
-                f"✅ למדתי! הוספתי לזיכרון שלי.\n\n*סיכום:*\n{summary[:400]}",
+                f"✅ *למדתי ושמרתי!*\n\n{summary[:500]}",
                 parse_mode="Markdown",
             )
         except Exception as e:
-            logger.error("Failed to write MEMORY.md: %s", e)
-            await update.message.reply_text("⚠️ שגיאה בשמירת הידע.")
+            logger.error("MEMORY.md write failed: %s", e)
+            await update.message.reply_text("⚠️ שגיאה בשמירה לזיכרון.")
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _extract_ticker(text: str) -> str | None:
-    """Extract stock ticker from user message."""
-    import re
-    # Match patterns like NFLX, $NFLX, "NFLX stock", "על NFLX"
-    patterns = [
-        r'\$([A-Z]{1,5})\b',           # $NFLX
-        r'\b([A-Z]{2,5})\b(?=\s|$)',   # NFLX at end or followed by space
-    ]
-    for pattern in patterns:
-        matches = re.findall(pattern, text.upper())
-        # Filter out common non-ticker words
-        skip = {'IV', 'DTE', 'ATM', 'OTM', 'ITM', 'PUT', 'CALL', 'VIX',
-                'RSI', 'SMA', 'EMA', 'CSP', 'CC', 'AI', 'OK', 'US', 'API',
-                'RANK', 'THE', 'AND', 'FOR', 'NOT', 'ARE', 'ETF', 'SPY',
-                'QQQ', 'SPX', 'NDX', 'CEO', 'SEC', 'FDA', 'IPO', 'PE',
-                'TELL', 'WHAT', 'WHEN', 'HOW', 'WHY', 'CAN', 'WILL', 'HAS',
-                'STOCK', 'ABOUT', 'FROM', 'WITH', 'THIS', 'THAT', 'JUST',
-                'LONG', 'SHORT', 'HIGH', 'LOW', 'OPEN', 'CLOSE', 'GOOD',
-                'BEST', 'NEXT', 'LAST', 'WEEK', 'DAY', 'NOW', 'GET', 'SET',
-                'ME', 'IS', 'IT', 'IN', 'ON', 'AT', 'BY', 'IF', 'OF', 'TO',
-                'UP', 'AN', 'AS', 'DO', 'GO', 'BE', 'NO', 'SO', 'WE', 'MY',
-                'HE', 'OR', 'IM', 'ITS'}
-        for m in matches:
-            if m not in skip and len(m) >= 2:
-                return m
-    return None
-
-
-def _fetch_stock_context(ticker: str) -> str:
-    """Fetch real IV data for a ticker and format as context string."""
-    try:
-        from app.services.realtime_market_data import get_realtime_iv_data
-        data = get_realtime_iv_data(ticker)
-        if data.current_price <= 0:
-            return ""
-
-        iv_signal = "גבוה ✅" if data.iv_rank >= 35 else ("בינוני ⚠️" if data.iv_rank >= 20 else "נמוך ❌")
-        if data.iv_rank >= 50:
-            strategy_hint = "→ מכירת פרמיה (Iron Condor / Bull Put Spread)"
-        elif data.iv_rank >= 35:
-            strategy_hint = "→ Credit Spreads מוגדרי סיכון"
-        elif data.iv_rank >= 25:
-            strategy_hint = "→ Bull Put Spread בזהירות"
-        else:
-            strategy_hint = "→ IV נמוך מדי לאסטרטגיות מכירה. שקול Debit Spread או LEAPs"
-
-        return (
-            f"\n\n[Real-time market data for {ticker}]:\n"
-            f"Price: ${data.current_price}\n"
-            f"IV Current: {data.iv_current}%\n"
-            f"IV Rank: {data.iv_rank}/100 — {iv_signal} {strategy_hint}\n"
-            f"IV Percentile: {data.iv_percentile}/100\n"
-            f"Expected Move 30d: ±${data.expected_move_30d}\n"
-            f"ATM Call IV: {data.atm_call_iv}% | ATM Put IV: {data.atm_put_iv}%\n"
-            f"Bid-Ask Spread: {data.bid_ask_spread_pct}% ({'liquid ✅' if data.is_liquid else 'illiquid ⚠️'})\n"
-            f"Source: {data.data_source}"
-        )
-    except Exception:
-        return ""
-
-
-def _needs_realtime_data(text: str) -> bool:
-    """Detect if the question needs real-time web data from Perplexity."""
-    keywords = [
-        "היום", "עכשיו", "כרגע", "אמר", "הודיע", "חדשות", "דוח",
-        "פד", "fed", "fomc", "earnings", "דוחות",
-        "today", "now", "latest", "breaking", "just",
-        "what happened", "מה קרה", "מה נאמר",
-    ]
-    text_lower = text.lower()
-    return any(kw in text_lower for kw in keywords)
-
+# ── Helper ────────────────────────────────────────────────────────────────────
 
 def _split_message(text: str, limit: int = 4000) -> list[str]:
     if len(text) <= limit:
