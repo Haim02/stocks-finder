@@ -5,7 +5,10 @@ Starts BOTH the Telegram bot AND the APScheduler in a single process.
 
 Default mode (no flags): DAEMON — runs forever on Railway/VPS.
   - Telegram bot responds to /scan, /status, /options, /analyze
-  - APScheduler fires the daily options workflow at 16:45 Israel time (Mon–Fri)
+  - APScheduler jobs (Asia/Jerusalem, Mon–Fri):
+      10:00  morning_pipeline  — Agent 1 (MarketRegime) + Agent 2 (OptionsStrategist)
+      09:30–16:30  risk_check  — Agent 3 (RiskManager) every hour
+      16:45  daily_summary     — Orchestrator end-of-day summary
 
 Single-run mode (--once): execute one agent cycle and exit.
   Used for manual testing or cron-based orchestration.
@@ -13,8 +16,6 @@ Single-run mode (--once): execute one agent cycle and exit.
 Usage:
     python run_agent.py          # daemon: scheduler + Telegram bot (Railway default)
     python run_agent.py --once   # single options-agent run, then exit
-
-Schedule: 16:45 Asia/Jerusalem = 09:45 US/Eastern (correct in all seasons).
 """
 
 import argparse
@@ -90,8 +91,11 @@ def run_daemon() -> None:
     """
     Production mode: start APScheduler + Telegram bot in one process.
 
-    Scheduler: fires run_once() at 16:45 Asia/Jerusalem, Mon–Fri.
-    Telegram:  responds to /scan /status /options /analyze (blocking main thread).
+    Scheduler jobs:
+      - morning_pipeline : 10:00 Israel (Agent 1 + Agent 2)
+      - risk_check       : hourly 09:30–16:30 Israel (Agent 3)
+      - daily_summary    : 16:45 Israel
+    Telegram: responds to /scan /status /options /analyze (blocking main thread).
     """
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
@@ -106,24 +110,9 @@ def run_daemon() -> None:
         logger.error("python-telegram-bot not installed. Run: pip install python-telegram-bot")
         sys.exit(1)
 
-    SCAN_TZ   = "Asia/Jerusalem"
-    SCAN_HOUR = 16
-    SCAN_MIN  = 45
+    SCAN_TZ = "Asia/Jerusalem"
 
     scheduler = BackgroundScheduler(timezone=SCAN_TZ)
-    scheduler.add_job(
-        run_once,
-        trigger=CronTrigger(
-            day_of_week="mon-fri",
-            hour=SCAN_HOUR,
-            minute=SCAN_MIN,
-            timezone=SCAN_TZ,
-        ),
-        id="daily_agent_run",
-        name=f"Daily Options Agent ({SCAN_HOUR:02d}:{SCAN_MIN:02d} Israel)",
-        replace_existing=True,
-        misfire_grace_time=300,
-    )
 
     global _orchestrator
     from app.agent.orchestrator import AgentOrchestrator
@@ -185,7 +174,7 @@ def run_daemon() -> None:
     logger.info("║   Daemon Mode — Scheduler + Telegram Bot     ║")
     logger.info("╚══════════════════════════════════════════════╝")
     logger.info("Environment : %s", env_label)
-    logger.info("Schedule    : %02d:%02d %s (Mon–Fri)", SCAN_HOUR, SCAN_MIN, SCAN_TZ)
+    logger.info("Timezone    : %s (Mon–Fri)", SCAN_TZ)
     logger.info("Next run    : %s", next_run)
 
     try:
