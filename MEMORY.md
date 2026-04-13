@@ -467,4 +467,455 @@ JPM, GS, V, MA (financial sector — clean IV cycles around earnings)
 
 ---
 
+## 📚 COMPREHENSIVE OPTIONS STRATEGY KNOWLEDGE BASE
+### Source: Multiple courses + practical trading guides (April 2026)
+
+---
+
+### CORE PRINCIPLE — THE OPTIONS SELLER MINDSET
+
+Every trade has a defined structure. Plan ALL outcomes before entering:
+1. Stock stays above Strike → keep premium ✅
+2. Stock drops but I still like it → Roll Down & Out, collect more premium
+3. I get assigned → buy shares I wanted at a discount → start Covered Call cycle
+
+**"No outcome is a surprise."** — JasonL_Capital
+
+IV historically overprices actual volatility 80-85% of the time.
+This is the structural edge for sellers. Never forget it.
+
+---
+
+### STRATEGY 1: CASH-SECURED PUT (CSP)
+
+**Market:** Bullish to Neutral-Bullish
+**Core idea:** Get paid to agree to buy shares at a price you WANT to own them at.
+
+**Setup rules:**
+- Only sell CSPs on stocks you'd HAPPILY OWN for years if assigned
+- Strike (Short Put): Delta 0.20-0.25 (~80% probability of keeping premium)
+- DTE: 30-45 days (monthly expiration closest to ~35 DTE)
+- IV Rank minimum: 35 (premium must justify the risk)
+- Collateral: Strike × 100 held in cash
+- Credit target: minimum 1% of collateral per month
+
+**Real example (from course):**
+- $IREN: Sell $35 Put expiring 4/17
+- Collateral: $3,500 | Premium: $163
+- Return: 4.7% in 36 days = 47% annualized
+- IV: 103.44% | Delta: -0.1998 | Theta: -0.0573
+
+**Management:**
+- Close at 50% profit (collected $1.50 → buy back at $0.75)
+- Roll Down & Out if approaching strike: close current, sell lower strike further out
+- If assigned → DO NOT PANIC → move to Covered Call phase
+
+**Do NOT use CSP on:**
+- Stocks you don't want to own
+- Stocks with earnings inside the expiration cycle (unless intentional)
+- Illiquid options (bid-ask spread > 10% of mid-price)
+
+---
+
+### STRATEGY 2: COVERED CALL (CC)
+
+**Market:** Neutral to Mildly Bullish (when already owning 100 shares)
+**Core idea:** Collect premium on shares you already hold. If called away — sell at profit.
+
+**Setup rules:**
+- Own 100 shares of the underlying
+- Sell Call OTM: Delta 0.20-0.30
+- Strike: above current price + above your cost basis
+- DTE: 30-45 days
+- IV Rank: ≥ 30
+
+**Real example (from course):**
+- $HOOD: Sell $90 Covered Call expiring 4/17
+- Premium: $1.40 | IV: 56.86% | Delta: 0.2088 | Theta: -0.0610
+
+**Management:**
+- Close at 50% profit
+- Roll Out (same strike, later expiration) if approaching strike with profit still available
+- If called away → profit realized on shares + premium collected → return to CSP phase
+
+---
+
+### STRATEGY 3: THE WHEEL STRATEGY
+
+**Market:** Long-term bullish. Works in ANY environment if stock is chosen correctly.
+**Core idea:** Continuous income generation through a repeating CSP → CC cycle.
+
+**The complete cycle:**
+```
+PHASE 1: Sell Cash-Secured Put
+  → Stock stays above strike: Keep premium → repeat Phase 1
+  → Stock drops below strike: Get Assigned → go to Phase 2
+
+PHASE 2: Own 100 shares at discounted cost basis
+  (Cost basis = Strike - Premium collected)
+  → This is NOT a loss. It's the system working.
+
+PHASE 3: Sell Covered Calls against shares
+  → Stock stays below call strike: Keep premium → repeat Phase 3
+  → Stock rises above call strike: Shares called away → go to Phase 4
+
+PHASE 4: Shares sold at profit + Capital gains
+  → Every phase generated income. Capital is free. Go back to Phase 1.
+```
+
+**Critical rule:** Every phase generates income. There is NO market environment where the Wheel leaves you doing nothing.
+
+**Best underlying for Wheel:** SPY, QQQ, AAPL, MSFT, AMZN — liquid, stable, you'd want to own them.
+
+**Avoid for Wheel:** Volatile meme stocks, pre-earnings setups, stocks below $30.
+
+---
+
+### STRATEGY 4: BULL PUT SPREAD
+
+**Market:** Bullish to Neutral
+**Core idea:** Sell Put at higher strike, buy Put at lower strike. Defined risk version of CSP.
+
+**Structure:**
+- Sell Put at Strike A (OTM, Delta ~0.20)
+- Buy Put at Strike B (further OTM, Delta ~0.10)
+- Width: $5 (standard for liquid ETFs)
+- Net credit = premium sold - premium bought
+- Max profit: net credit
+- Max loss: (Width - Credit) × 100
+
+**Example with $5 wide spread:**
+- Stock at $100 | Sell $95 Put for $2.00 | Buy $90 Put for $0.50
+- Net credit: $1.50 ($150 per spread)
+- Max loss: $350 per spread
+- Breakeven: $93.50 (6.5% cushion)
+
+**Setup rules:**
+- Short Strike Delta: 0.20-0.25 (outside 1SD expected move)
+- Collect minimum: 1/3 of spread width ($5 wide → collect ≥ $1.65)
+- DTE: 30-45 days
+- IV Rank: ≥ 25 (minimum), ≥ 35 (preferred)
+
+**Management:**
+- Close at 50% profit
+- Stop loss: 2-2.5× credit collected
+- Review at 21 DTE
+- Hard exit at 10 DTE (gamma risk)
+
+---
+
+### STRATEGY 5: BEAR CALL SPREAD
+
+**Market:** Bearish to Neutral
+**Core idea:** Sell Call at lower strike, buy Call at higher strike. Mirror of Bull Put Spread.
+
+**Structure:**
+- Sell Call at Strike A (OTM above price, Delta ~0.20)
+- Buy Call at Strike B (further OTM, Delta ~0.10)
+- Profit when stock stays BELOW short strike
+
+**When to use:**
+- Stock in clear downtrend
+- Near resistance level
+- After rejection from major moving average
+- High IV environment (IV Rank ≥ 25)
+
+**Never use Bear Call Spread in a strong bullish trend.**
+
+**Same management rules as Bull Put Spread.**
+
+---
+
+### STRATEGY 6: IRON CONDOR
+
+**Market:** Neutral — stock expected to stay in a defined range
+**Core idea:** Bull Put Spread (below) + Bear Call Spread (above) = collect from both sides.
+
+**Structure:**
+- Sell Put at Strike A (below current price, Delta ~0.16-0.20)
+- Buy Put at Strike B (further below, protection)
+- Sell Call at Strike C (above current price, Delta ~0.16-0.20)
+- Buy Call at Strike D (further above, protection)
+- Profit zone: stock stays between Strike A and Strike C
+
+**Example:**
+- Stock at $200
+- Buy $185 Put / Sell $190 Put / Sell $210 Call / Buy $215 Call
+- Total credit: $2.00 | Profit zone: $190-$210 | Breakevens: $188 and $212
+
+**Requirements:**
+1. Genuinely neutral outlook — no strong trend
+2. IV Rank ≥ 35 (MANDATORY — need rich premium on both wings)
+3. NO earnings inside expiration window
+4. Both short strikes outside 1SD expected move
+
+**Management (4 decisions only):**
+1. Take profit at 50% of credit
+2. Roll untested side closer if stock makes temporary move (collect extra $0.30-0.50)
+3. Close only the losing side if move is sustained
+4. Exit before max loss — close everything if premium reaches 2× credit
+
+**Do NOT hold to expiration.** Hard exit at 10 DTE.
+
+---
+
+### STRATEGY 7: POOR MAN'S COVERED CALL (PMCC)
+
+**Market:** Bullish long-term
+**Core idea:** Replace 100 shares with a deep ITM LEAP call. Run Covered Call strategy at 65% less capital.
+
+**Structure:**
+- Step 1: Buy deep ITM LEAP Call (Delta 0.80+, 1+ year out) → the "shares"
+- Step 2: Sell short-term OTM Call (~30 DTE, Delta ~0.20) against it → income
+- Step 3: Collect premium monthly, repeat
+
+**Capital comparison:**
+- Traditional Covered Call on $100 stock: $10,000
+- PMCC on same stock: ~$3,500 (just the LEAP)
+- **65% less capital for similar exposure**
+
+**Key insight:** The REAL profit comes from the LEAP appreciating as the stock rises. The monthly premiums are a BONUS that reduces your cost basis each month.
+
+**Risks:**
+- LEAP loses value if stock drops (leveraged downside)
+- Theta decay affects the LEAP over time (less than short options)
+- Never sell the short call above the LEAP strike (creates spread, not PMCC)
+
+**DO NOT USE PMCC until you've mastered CSP and CC.**
+
+---
+
+### STRATEGY 8: CALENDAR SPREAD
+
+**Market:** Neutral, expecting IV to rise
+**Core idea:** Sell short-term option, buy longer-term option at same strike. Profit from time decay difference and IV expansion.
+
+**Best environment:** Low IV (cheap to buy the long option)
+**Profit from:** Theta decay of short leg + IV increase on long leg
+
+**Avoid:** High IV environments (long option becomes expensive relative to premium collected)
+
+---
+
+### STRATEGY 9: LONG CALL / LEAPs
+
+**Market:** Strongly bullish
+**Core idea:** Leveraged bullish bet with defined risk.
+
+**When to buy LEAPs:**
+- IV is LOW (cheap premium)
+- You have high conviction on direction
+- You want leverage without unlimited downside
+
+**Setup:**
+- Delta: 0.70-0.80+ (Deep ITM — moves almost like owning shares)
+- DTE: 1+ year (enough time for thesis to play out)
+- Avoid buying ATM or OTM long calls (Theta kills you)
+
+**"Don't confuse a cheap premium with a good deal. Far OTM options look like bargains but have dramatically lower chance of working."**
+
+---
+
+### STRATEGY 10: SHORT STRANGLE (Advanced — VIX Spikes)
+
+**Market:** Neutral, VERY high IV environment (VIX spikes, IVR ≥ 50)
+**Core idea:** Sell OTM Put AND OTM Call simultaneously. Collect premium from both sides.
+
+**From course (Image 7):**
+- Use when VIX spikes — shift to selling naked puts and strangles
+- Effectively selling volatility
+- IVR must be ≥ 50
+- Prefer SPY or QQQ (less volatile, better liquidity)
+
+**WARNING:** Undefined risk on both sides. Requires:
+- Large Margin account
+- Portfolio Margin approval at IB
+- Very active position management
+- NEVER use on single volatile stocks
+
+**This strategy is NOT suitable for small accounts.**
+
+---
+
+### STRATEGY 11: 0DTE CREDIT SPREADS (Ultra-Advanced)
+
+**Market:** Any — but requires full-time monitoring
+**Core idea:** Sell same-day expiration credit spreads. Rapid Theta decay.
+
+**Method (from Image 10):**
+- Buy Vega wings 1-7 DTE (protection)
+- Sell 0DTE credit spreads with Delta 7-20 (7-20% probability of being tested)
+- Entry: 2 minutes after market open
+- Exit: 10 minutes before close
+- 150-200 trades per day → ~100% annual return possible
+
+**Requirements:**
+- Full-time monitoring (cannot leave positions unattended)
+- Very fast execution platform
+- Deep understanding of Gamma Risk
+- Large enough account to absorb daily fluctuations
+
+**THIS IS NOT SUITABLE FOR PART-TIME TRADERS.**
+
+---
+
+### STRIKE SELECTION GUIDE (from courses)
+
+**ITM (In The Money) — Delta 0.50-0.90:**
+- Most conservative for selling
+- Moves closely with stock
+- Less leverage, highest probability of profit
+- Higher capital required
+
+**ATM (At The Money) — Delta ~0.50:**
+- Middle ground
+- Balance of cost, leverage, and probability
+- Used for straddles/strangles
+
+**OTM (Out of The Money) — Delta 0.10-0.30:**
+- For credit spreads: Delta 0.15-0.25 (sweet spot)
+- For buying: need strong directional conviction
+- Far OTM (~0.05 Delta): lottery ticket — avoid as primary strategy
+
+**"Don't confuse a cheap premium with a good deal."**
+
+---
+
+### IV DECISION MATRIX (from courses)
+
+| IV Environment | Action |
+|---------------|--------|
+| High IV (IVR ≥ 50) | Sell premium aggressively |
+| High IV + oversold | Sell Cash-Secured Puts |
+| High IV + overbought | Sell Covered Calls |
+| High IV + neutral | Iron Condor / Short Strangle |
+| Low IV (IVR < 25) | Buy options (LEAPs, Long Calls) |
+| Low IV + oversold | Buy long-dated calls |
+| Low IV + neutral | Calendar Spread |
+
+---
+
+### PRACTICAL TRADING RULES (from multiple courses)
+
+**7 Non-Negotiable Rules:**
+1. Only sell options on stocks I'd happily own for years (CSP/Wheel)
+2. Target ~0.20 delta (~80% probability of keeping premium)
+3. 30-45 DTE sweet spot (monthlies, never weeklies for swing trading)
+4. Close at 50% profit — always, no exceptions
+5. Check IV environment first — HIGH IV = sell, LOW IV = buy LEAPs
+6. Liquidity is non-negotiable — tight bid-ask spreads or move on
+7. Always have a written exit plan BEFORE entering any trade
+
+**9 Practical Tips (RanOptions course):**
+1. ATM options are "explosive" — take profits fast when near expiration
+2. In volatile stocks, options are expensive — trade patiently
+3. When OTM becomes deep ITM — trade it like stock ownership
+4. When IV is very high — expect IV crush, use selling strategies
+5. If you bought an option and IV rose sharply — good time to sell
+6. Don't hedge during a crisis — build protection BEFORE the market prices in the drop
+7. "Solid" options = deep ITM, behaves like 100 shares
+8. Take profits fast — especially when approaching expiration
+9. Invest only what you can afford to lose to zero (options decay)
+
+---
+
+### EARLY ASSIGNMENT & PIN RISK (from RanOptions course)
+
+**Pin Risk (buying options):**
+- If option expires slightly ITM → broker automatically exercises it
+- You wake up Monday with 100 shares (Call) or -100 shares (Put)
+- Weekend gap risk can be catastrophic
+- Solution: **Always close options before expiration if near the strike**
+
+**Pin Risk (selling options):**
+- Buyer can exercise up to 1 HOUR after market close on expiration day
+- Even if expired OTM, after-hours news can push it ITM
+- Then you get assigned Monday morning at a bad price
+- Solution: **Close all short options before end of expiration day**
+
+---
+
+### BLACK-SCHOLES & IV UNDERSTANDING (from RanOptions course)
+
+**Black-Scholes inputs:**
+- Stock price | Strike price | Time to expiration | Implied Volatility | Risk-free rate
+
+**IV = Implied Volatility:**
+- Derived BACKWARDS from the option's market price
+- IV of 10% = market prices 68% chance of stock moving ±10% in 1 year
+- 2 standard deviations (95% probability) = ±20% in 1 year
+- Formula to convert to X days: IV × √(X/252)
+
+**Deep ITM options have artificially high IV** (don't use for IV measurement)
+**Use ATM options** to measure true market expected IV.
+
+**After earnings:** IV always CRASHES (IV crush). Options become cheap immediately.
+**Before earnings:** IV always INFLATES. Options become expensive.
+
+---
+
+### OPTION PRICE = INTRINSIC VALUE + EXTRINSIC VALUE
+
+**Intrinsic Value:** What you'd get if you exercised right now
+- Call: max(0, Stock Price - Strike)
+- Put: max(0, Strike - Stock Price)
+
+**Extrinsic Value (Time Value):** Option price - Intrinsic Value
+- This is what sellers collect and buyers pay
+- Decays to zero by expiration (Theta)
+- Accelerates after 35 DTE (the hockey stick)
+
+**Deep ITM options:** Mostly intrinsic value. Manage like stock.
+**OTM options:** All extrinsic value. Sellers want this to decay to zero.
+
+---
+
+### GLOSSARY (Hebrew-English quick reference)
+
+- קול = Call | פוט = Put
+- שער מימוש = Strike Price
+- תאריך פקיעה = Expiration Date
+- פרמיה = Premium
+- ערך פנימי = Intrinsic Value
+- ערך חיצוני = Extrinsic Value (Time Value)
+- מחוץ לכסף = OTM (Out of The Money)
+- בתוך הכסף = ITM (In The Money)
+- בכסף = ATM (At The Money)
+- דלתא = Delta | גאמא = Gamma | תטא = Theta | וגה = Vega
+- השמה מוקדמת = Early Assignment
+- נכס הבסיס = Underlying Asset
+- גודל חוזה = Contract Size (always 100 shares for US stocks)
+
+---
+
+### AGENT INSTRUCTIONS — HOW TO USE THIS KNOWLEDGE
+
+**When Haim asks about a trade:**
+1. First identify: What is the market direction? (bullish/bearish/neutral)
+2. Check: What is the IV Rank? (sell high, buy low)
+3. Check: Is there earnings inside the expiration window?
+4. Select strategy from the matrix above
+5. Calculate: Expected Move, appropriate strikes (Delta 0.15-0.25 for selling)
+6. State: Credit collected, max loss, breakeven, probability of profit
+7. State: Management rules BEFORE entry (50% profit target, 2× stop loss, 21 DTE review, 10 DTE exit)
+
+**Never recommend:**
+- Naked calls or puts without explicitly noting the unlimited risk
+- Strategies with earnings inside the cycle (unless intentional earnings play)
+- Options with bid-ask spread > 10% of mid-price
+- 0DTE strategies for part-time traders
+- Far OTM long options as "lottery tickets"
+
+**Always remind:**
+- The Wheel only works on stocks you'd happily own
+- Defined risk ≠ small risk (10 condors × $300 = $3,000 real exposure)
+- Time decay works FOR sellers, AGAINST buyers — every single day
+
+---
+
+*Source: RanOptions course + "מאפס למאה באופציות" 109 pages + JasonL_Capital guides + TheOptionPremium.com*
+*Learned and integrated: April 2026*
+
+---
+
 *Last updated: April 2026*
