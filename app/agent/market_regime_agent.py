@@ -37,6 +37,8 @@ from app.services.perplexity_service import PerplexityService, PerplexityResearc
 
 logger = logging.getLogger(__name__)
 
+_last_macro_snapshot = None  # populated by _fetch_macro(), used in verdict + summary
+
 
 # ── Data model ────────────────────────────────────────────────────────────────
 
@@ -148,17 +150,15 @@ def _fetch_sentiment_avg() -> float:
 
 
 def _fetch_macro() -> tuple[str, float, float]:
-    """Returns (regime, fed_rate, cpi_yoy) from api_hub."""
+    """Returns (regime, fed_rate, cpi_yoy) using FRED real data."""
+    global _last_macro_snapshot
     try:
-        from app.services.api_hub import get_macro_context
-        macro = get_macro_context()
-        return (
-            macro.get("regime", "unknown"),
-            float(macro.get("fed_rate", 0.0) or 0.0),
-            float(macro.get("cpi_yoy", 0.0) or 0.0),
-        )
+        from app.services.fred_service import get_macro_snapshot
+        snapshot = get_macro_snapshot()
+        _last_macro_snapshot = snapshot
+        return snapshot.regime, snapshot.fed_funds_rate, snapshot.cpi_yoy
     except Exception as e:
-        logger.warning("Macro fetch failed: %s", e)
+        logger.warning("FRED macro fetch failed: %s", e)
         return "unknown", 0.0, 0.0
 
 
@@ -226,6 +226,12 @@ def _calculate_verdict(
         return "RED"
     if vix > 28 and spy_trend == "bearish":
         return "RED"
+    # FRED: inverted yield curve (recession signal)
+    if _last_macro_snapshot and _last_macro_snapshot.yield_curve < -0.5:
+        return "RED"
+    # FRED: high recession probability
+    if _last_macro_snapshot and _last_macro_snapshot.recession_probability > 50:
+        return "RED"
 
     # YELLOW
     if vix > 22:
@@ -270,11 +276,21 @@ def _build_hebrew_summary(
         f"• IV Rank (SPY): `{report.iv_rank}%`",
         f"• סנטימנט שוק: `{report.sentiment_avg}/10`",
         f"",
-        f"🌍 *מאקרו:*",
-        f"• Fed Rate: `{report.fed_rate}%`",
-        f"• CPI YoY: `{report.cpi_yoy}%`",
-        f"• Regime: `{report.macro_regime}`",
     ]
+
+    # Macro section — use rich FRED data if available
+    if _last_macro_snapshot:
+        from app.services.fred_service import format_for_telegram
+        lines.append("")
+        lines.append(format_for_telegram(_last_macro_snapshot))
+    else:
+        lines.extend([
+            f"",
+            f"🌍 *מאקרו:*",
+            f"• Fed Rate: `{report.fed_rate}%`",
+            f"• CPI YoY: `{report.cpi_yoy}%`",
+            f"• Regime: `{report.macro_regime}`",
+        ])
 
     # Perplexity section
     if research and research.has_data:

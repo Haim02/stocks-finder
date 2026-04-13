@@ -36,6 +36,8 @@ beautifulsoup4
 cloudscraper
 finviz
 finvizfinance
+fredapi>=0.5.1
+# openbb>=4.0.0  # optional: large (~500MB), skip on constrained deployments
 
 # ── Email ─────────────────────────────────────────────────────────────────────
 resend

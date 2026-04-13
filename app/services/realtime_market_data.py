@@ -218,6 +218,19 @@ def get_realtime_iv_data(ticker: str) -> RealTimeIVData:
 
     data_source = "yfinance" if current_iv_raw > 0 else "proxy"
 
+    # Enhancement: try OpenBB for more accurate IV Rank
+    try:
+        from app.services.openbb_service import get_iv_rank_openbb
+        openbb_result = get_iv_rank_openbb(ticker)
+        if openbb_result:
+            openbb_iv, _ = openbb_result
+            if openbb_iv > 0:
+                current_iv_pct = openbb_iv
+                data_source = "openbb+yfinance"
+                logger.info("%s: OpenBB IV override → %.1f%%", ticker, current_iv_pct)
+    except Exception:
+        pass  # graceful fallback to yfinance
+
     # Step 3: Calculate IV Rank and Percentile
     iv_rank, iv_pct, iv_high, iv_low = _calc_iv_rank_from_history(ticker, current_iv_pct)
 

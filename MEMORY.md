@@ -433,4 +433,38 @@ JPM, GS, V, MA (financial sector — clean IV cycles around earnings)
 
 ---
 
+## 📊 DATA SOURCES & CAPABILITIES (Updated April 2026)
+
+### Macro Data — FRED (Federal Reserve Economic Data)
+- **fredapi** connected to real FRED database
+- Data: Fed Funds Rate, CPI, PCE, 10Y Treasury, Yield Curve, Unemployment, Recession Probability
+- Update frequency: daily (Fed Funds) to monthly (CPI, PCE)
+- Key insight: Inverted yield curve (10Y-2Y < -0.5%) = recession signal → Agent 1 turns RED
+- Key insight: Recession probability > 50% → Agent 1 turns RED
+- Free API key from: fred.stlouisfed.org
+
+### Options + Equity Data — OpenBB (when installed)
+- Open source terminal: github.com/OpenBB-finance/OpenBB
+- Enhances IV Rank calculation beyond yfinance approximation
+- Earnings calendar integration
+- Macro indicators as secondary source
+- Large install (~500MB) — optional, system falls back gracefully if absent
+
+### Data Priority Stack:
+1. FRED → macro regime (most accurate for Fed/CPI/rates)
+2. OpenBB → IV Rank enhancement (when available)
+3. yfinance → options chains, real-time prices, IV calculation
+4. Perplexity → real-time news and events
+5. OpenAI GPT-4o-mini → batch sentiment scoring
+6. Claude Sonnet → analysis, commentary, free chat
+
+### What the Agent Knows About Macro Regimes:
+- **Expansion**: Fed rate moderate, CPI near target, yield curve positive → GREEN
+- **Slowdown**: Yield curve flat/slightly inverted, S&P weak → YELLOW
+- **Stagflation**: High CPI + high unemployment → YELLOW/RED
+- **Recession**: Inverted yield curve (< -0.5%) + recession prob > 50% → RED
+- **Recovery**: Strong S&P, falling unemployment, CPI declining → GREEN
+
+---
+
 *Last updated: April 2026*
