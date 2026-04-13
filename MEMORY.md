@@ -918,4 +918,263 @@ PHASE 4: Shares sold at profit + Capital gains
 
 ---
 
+## 📚 WHEEL STRATEGY DEEP KNOWLEDGE
+### Source: wheelstrategyoptions.com (April 2026)
+
+---
+
+### THE WHEEL STRATEGY — COMPLETE FRAMEWORK
+
+**Core principle:** Consistent income generation through a systematic CSP → CC cycle.
+Works in ANY market condition because every outcome is planned in advance.
+
+**Expected returns (realistic):** 1-3% per month on capital deployed = 12-36% annually.
+Not 47% annualized every month — that's only possible with very high IV stocks.
+
+**Best stocks for The Wheel:**
+- Large cap, liquid, stable: AAPL, MSFT, NVDA, AMZN, TSLA, SPY, QQQ
+- Market cap > $1B
+- Average volume > 500K shares/day
+- You must be willing to OWN them if assigned
+
+**Never use The Wheel on:**
+- Stocks you wouldn't want to own at any price
+- Stocks with earnings within 14 days
+- Low-priced stocks under $20 (too little premium for the risk)
+- Stocks with market cap < $1B (liquidity risk)
+
+---
+
+### STRIKE PRICE SELECTION — COMPLETE FRAMEWORK
+
+**The Strike Dilemma:** Too close to money = frequent assignment. Too far = not enough premium.
+
+**Delta guide for CSP (selling puts):**
+
+| Delta | Assignment Probability | Premium | Risk Level |
+|-------|----------------------|---------|------------|
+| -0.40 | ~40% | Highest | Aggressive |
+| -0.30 | ~30% | High | Moderate |
+| -0.20 | ~20% | Medium | Conservative (SWEET SPOT) |
+| -0.10 | ~10% | Low | Very Safe |
+
+**Sweet spot: Delta 0.20-0.30**
+- High enough premium to be worthwhile
+- Low enough probability to avoid constant assignment
+- Good risk-reward balance
+
+**4-Step Strike Selection Framework:**
+1. Start with delta → filter to 0.20-0.30 range
+2. Check technical support → prefer strikes at or BELOW support level
+3. Calculate yield → minimum 1%+ monthly on capital deployed
+4. Consider stock context → adjust for current volatility and conviction
+
+**Adjusting for market conditions:**
+- High Volatility (VIX > 22): Go more conservative (0.15-0.20 delta). Premiums are elevated so you can go further OTM while still collecting decent premium.
+- Low Volatility (VIX < 15): May need 0.25-0.30 delta for acceptable premium. Or find stocks with elevated IV Rank.
+
+**Example strike analysis (stock at $100):**
+
+| Strike | Delta | Monthly Yield | Support? | Best Choice? |
+|--------|-------|---------------|---------|-------------|
+| $97.50 | -0.35 | 2.9% | No | Risky |
+| $95.00 | -0.25 | 2.0% | Yes | ✅ Best |
+| $92.50 | -0.18 | 1.3% | Yes | Conservative |
+| $90.00 | -0.12 | 0.8% | Yes | Too little premium |
+
+**Premium Yield Formula:**
+- Monthly Yield = (Premium / Strike Price) × 100
+- Annualized = Monthly Yield × (365 / DTE)
+
+---
+
+### AVOIDING VALUE TRAPS — CRITICAL KNOWLEDGE
+
+**Key insight:** High premium is usually a WARNING SIGN, not an opportunity.
+The market prices premium based on KNOWN RISK. High IV = high risk.
+
+**Why premium is high — RED FLAGS:**
+
+| High Premium Cause | What It Signals | Action |
+|-------------------|-----------------|--------|
+| Upcoming earnings | Binary event (gap risk) | AVOID unless intentional |
+| FDA decision pending | Regulatory uncertainty | AVOID |
+| Recent price crash | Potential continued decline | INVESTIGATE |
+| Takeover rumor | Acquisition volatility | AVOID |
+| Sector panic | Systemic risk | REDUCE SIZE |
+
+**The Earnings Trap (most common mistake):**
+- IV spikes 50-100%+ before earnings → premiums look "amazing"
+- Reality: Stock can gap 10-20% overnight → your 0.20 delta put becomes deep ITM instantly
+- No time to adjust or roll
+- One bad trade wipes out months of gains
+- RULE: Never sell puts expiring within 7 days of earnings (unless intentional earnings play)
+
+**Fundamental Red Flags (check before ANY wheel trade):**
+1. Negative earnings / unprofitable company
+2. High debt levels (balance sheet stress)
+3. Declining revenue (shrinking business)
+4. Recent management turnover
+5. SEC investigation or accounting concerns
+6. Death cross (50MA < 200MA) on chart
+7. Breaking major support levels
+8. Short interest at 52-week high
+
+**High IV Rank vs High IV — Know the difference:**
+- High IV Rank (GOOD): IV elevated relative to its own history → opportunity to sell
+- High IV absolute (POTENTIALLY BAD): Could signal known upcoming event → investigate why
+
+**Quality Screening Filters (use ALL of these):**
+1. Earnings date > 14 days away ✅
+2. Positive earnings (P/E > 0) ✅
+3. IV Rank > 30 (elevated but not extreme) ✅
+4. Market cap > $1B ✅
+5. Average volume > 500K ✅
+
+**Position Concentration Rule:**
+NEVER allocate more than 10-15% of options capital to a single stock.
+"It can't happen to me" is what everyone says before the stock crashes 50%.
+
+**Real Case Study (Value Trap):**
+- Retail stock shows 8% monthly yield on puts (normal: 2%)
+- Investigation: Earnings in 3 days + competitor just reported terrible + short interest at 52-week high + support already broken
+- Outcome: Stock gaps down 25% after earnings
+- Lesson: THE MARKET KNEW THE RISK. Premium was priced fairly for the actual danger.
+
+---
+
+### ROLLING OPTIONS — COMPLETE GUIDE
+
+**What is Rolling:** Close current option + simultaneously open new one with different terms.
+Execute as a SINGLE SPREAD ORDER to minimize slippage.
+
+**Types of rolls:**
+
+**Roll Out** (same strike, later expiration):
+- Purpose: Collect more premium, extend duration
+- When: Position working well, want to continue generating income
+- Result: Usually a credit
+
+**Roll Down** (lower strike — for puts):
+- Purpose: Reduce assignment risk when stock is falling
+- When: Stock dropped toward your strike, still bullish long-term
+- Result: May be small debit or credit
+
+**Roll Up** (higher strike — for puts):
+- Purpose: More aggressive, more premium when stock rallied
+- When: Stock rallied well above strike, want to reset
+- Result: Usually a credit
+
+**Roll Up and Out** (higher strike + later expiration — for calls):
+- Purpose: Give stock room to run when it approaches your call strike
+- When: Stock approaching call strike, don't want to give up shares
+- Result: Often debit or small credit
+
+**Roll Decision Matrix:**
+
+| Position | Stock Movement | Action |
+|----------|---------------|--------|
+| Put sold | Stock down near strike | Roll Down and Out |
+| Put sold | Stock up, low premium | Close OR Roll Up |
+| Put sold | Stock flat | Let expire OR Roll Out |
+| Call sold | Stock up near strike | Roll Up and Out |
+| Call sold | Stock down | Let expire OR Roll Down |
+| Call sold | Stock flat | Roll Out for more premium |
+
+**When to Roll — YES:**
+1. You still want to stay in the position (bullish on stock)
+2. You can collect a credit (or at worst, tiny debit)
+3. New position has good standalone risk/reward
+4. Meaningful time value still available in new expiration
+
+**When NOT to Roll — NO:**
+1. You'd take a significant debit (better to just close)
+2. Fundamentals have changed (stock no longer meets quality criteria)
+3. Better opportunities exist elsewhere (opportunity cost)
+4. You're "rolling forever" to avoid realizing a loss — DANGEROUS
+
+**The "Never Close at a Loss" TRAP:**
+Rolling endlessly to avoid realizing losses is DANGEROUS:
+- Ties up capital in losing position
+- Opportunity cost compounds
+- Stock might never recover
+- Leads to increasingly bad rolls
+
+RULE: Set max 2-3 rolls OR a maximum loss threshold (e.g., 2× premium collected).
+Then EXIT regardless, even at a loss.
+
+**Roll Execution Tips:**
+1. Use LIMIT ORDERS (not market orders)
+2. Roll during regular market hours only
+3. Don't roll too early — let theta decay work first (wait until 50% profit or 21 DTE)
+4. Consider rolling at 50% profit to lock in gains and reset
+5. Track ALL rolls for tax purposes
+
+**Example — Put Roll:**
+- Sold $50 put for $1.50, 30 DTE
+- Stock drops to $49
+- Action: Buy back $50 put for $2.50 (book $1.00 loss), sell $47.50 put with 45 DTE for $2.00
+- Net debit: $0.50
+- New breakeven: Lower strike, more time
+- If $47.50 expires worthless: Total profit = $1.00 over 75 days
+
+**Roll Tracking (for tax and performance):**
+Keep running total of all premium collected across rolls to understand true position P&L.
+
+---
+
+### REAL SCREENER DATA — AAPL CSP (April 2026)
+
+Current market data from wheelstrategyoptions.com:
+
+**AAPL at $255.92:**
+- 1,141 available CSP contracts
+- Average IV: 7.5% (LOW — not ideal for selling)
+- Peak IV: 30.7%
+- Best contract: $250 strike, May 15, 39 DTE, Delta -0.37, $7.50 premium, 2.90% yield
+- Rating: B
+
+**Insight:** AAPL's IV of 7.5% average is VERY LOW. This means:
+- CSP premiums are thin relative to capital required
+- Better to look for stocks with higher IV Rank (> 30) for better premium
+- AAPL is good for the Wheel when IV spikes to 20%+ (during market drops)
+
+**Other top Wheel candidates:** MSFT, NVDA, AMZN, TSLA, SPY, QQQ
+
+---
+
+### AGENT INSTRUCTIONS — WHEEL STRATEGY SPECIFIC
+
+**When Haim asks about a Wheel trade:**
+
+1. First ask: "Is this a stock you'd happily own if assigned?"
+2. Check: Earnings > 14 days away? (if not → flag as dangerous)
+3. Check: IV Rank > 30? (if not → premium may not justify risk)
+4. Check: Is it a quality company? (P/E > 0, Market cap > $1B)
+5. Look for: Strike at or below key technical support level
+6. Calculate: Monthly yield = (premium / strike) × 100 → target ≥ 1%
+7. State: All 3 scenarios before entry
+
+**Red flags to always check:**
+- Unusually high IV → ASK WHY before recommending
+- Earnings within cycle → DO NOT recommend CSP
+- Breaking major support → warn before entry
+- Stock below $20 → avoid (insufficient premium per dollar of risk)
+
+**Rolling rules for Haim:**
+- Roll when stock moves against you AND you're still bullish on the company
+- Max 2-3 rolls per position
+- Always collect credit on rolls when possible
+- Set maximum loss threshold = 2× original premium collected
+
+**Value trap warning trigger:**
+If a stock shows > 2× its normal IV → always investigate WHY before recommending
+
+---
+
+*Source: wheelstrategyoptions.com — 19-lesson free course + screener data*
+*Accessed: April 2026*
+
+---
+
 *Last updated: April 2026*
