@@ -153,6 +153,14 @@ class FreeChatHandler:
         # Enrich with real-time data if needed
         realtime_context = ""
 
+        # Auto-fetch real IV data if a ticker is mentioned
+        ticker = _extract_ticker(text)
+        if ticker:
+            stock_ctx = _fetch_stock_context(ticker)
+            if stock_ctx:
+                realtime_context += stock_ctx
+                logger.info("Auto-fetched IV data for %s", ticker)
+
         if _needs_realtime_data(text):
             # Try Perplexity first (real-time web)
             try:
@@ -254,6 +262,67 @@ class FreeChatHandler:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _extract_ticker(text: str) -> str | None:
+    """Extract stock ticker from user message."""
+    import re
+    # Match patterns like NFLX, $NFLX, "NFLX stock", "על NFLX"
+    patterns = [
+        r'\$([A-Z]{1,5})\b',           # $NFLX
+        r'\b([A-Z]{2,5})\b(?=\s|$)',   # NFLX at end or followed by space
+    ]
+    for pattern in patterns:
+        matches = re.findall(pattern, text.upper())
+        # Filter out common non-ticker words
+        skip = {'IV', 'DTE', 'ATM', 'OTM', 'ITM', 'PUT', 'CALL', 'VIX',
+                'RSI', 'SMA', 'EMA', 'CSP', 'CC', 'AI', 'OK', 'US', 'API',
+                'RANK', 'THE', 'AND', 'FOR', 'NOT', 'ARE', 'ETF', 'SPY',
+                'QQQ', 'SPX', 'NDX', 'CEO', 'SEC', 'FDA', 'IPO', 'PE',
+                'TELL', 'WHAT', 'WHEN', 'HOW', 'WHY', 'CAN', 'WILL', 'HAS',
+                'STOCK', 'ABOUT', 'FROM', 'WITH', 'THIS', 'THAT', 'JUST',
+                'LONG', 'SHORT', 'HIGH', 'LOW', 'OPEN', 'CLOSE', 'GOOD',
+                'BEST', 'NEXT', 'LAST', 'WEEK', 'DAY', 'NOW', 'GET', 'SET',
+                'ME', 'IS', 'IT', 'IN', 'ON', 'AT', 'BY', 'IF', 'OF', 'TO',
+                'UP', 'AN', 'AS', 'DO', 'GO', 'BE', 'NO', 'SO', 'WE', 'MY',
+                'HE', 'OR', 'IM', 'ITS'}
+        for m in matches:
+            if m not in skip and len(m) >= 2:
+                return m
+    return None
+
+
+def _fetch_stock_context(ticker: str) -> str:
+    """Fetch real IV data for a ticker and format as context string."""
+    try:
+        from app.services.realtime_market_data import get_realtime_iv_data
+        data = get_realtime_iv_data(ticker)
+        if data.current_price <= 0:
+            return ""
+
+        iv_signal = "גבוה ✅" if data.iv_rank >= 35 else ("בינוני ⚠️" if data.iv_rank >= 20 else "נמוך ❌")
+        if data.iv_rank >= 50:
+            strategy_hint = "→ מכירת פרמיה (Iron Condor / Bull Put Spread)"
+        elif data.iv_rank >= 35:
+            strategy_hint = "→ Credit Spreads מוגדרי סיכון"
+        elif data.iv_rank >= 25:
+            strategy_hint = "→ Bull Put Spread בזהירות"
+        else:
+            strategy_hint = "→ IV נמוך מדי לאסטרטגיות מכירה. שקול Debit Spread או LEAPs"
+
+        return (
+            f"\n\n[Real-time market data for {ticker}]:\n"
+            f"Price: ${data.current_price}\n"
+            f"IV Current: {data.iv_current}%\n"
+            f"IV Rank: {data.iv_rank}/100 — {iv_signal} {strategy_hint}\n"
+            f"IV Percentile: {data.iv_percentile}/100\n"
+            f"Expected Move 30d: ±${data.expected_move_30d}\n"
+            f"ATM Call IV: {data.atm_call_iv}% | ATM Put IV: {data.atm_put_iv}%\n"
+            f"Bid-Ask Spread: {data.bid_ask_spread_pct}% ({'liquid ✅' if data.is_liquid else 'illiquid ⚠️'})\n"
+            f"Source: {data.data_source}"
+        )
+    except Exception:
+        return ""
+
 
 def _needs_realtime_data(text: str) -> bool:
     """Detect if the question needs real-time web data from Perplexity."""
