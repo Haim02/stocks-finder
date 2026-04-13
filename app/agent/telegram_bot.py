@@ -1523,6 +1523,25 @@ async def cmd_strategist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Options Engine — /scan command
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/scan [TICKER ...] — Run options engine scanner."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text("🔍 סורק אופציות... ~30 שניות")
+    try:
+        from app.options_engine.scanner import run_options_engine
+        symbols = [a.upper() for a in context.args] if context.args else None
+        results = run_options_engine(symbols)
+        if not results:
+            await update.message.reply_text("😴 לא נמצאו הזדמנויות. נסה כשהשוק פתוח.")
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Agent 3 Commands — Position tracking & risk management
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1707,7 +1726,8 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("status",       status_command))
     app.add_handler(CommandHandler("market",       cmd_status))
     app.add_handler(CommandHandler("options",      cmd_options_0dte))
-    app.add_handler(CommandHandler("scan",         cmd_scan))
+    app.add_handler(CommandHandler("scan",         scan_command))
+    app.add_handler(CommandHandler("newscan",      cmd_scan))
 
     # ── Deep dive GS research note + email (was /analyze) ────────────────────
     app.add_handler(CommandHandler("deepdive",     cmd_analyze))
