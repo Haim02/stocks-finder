@@ -92,7 +92,6 @@ PERSONALITY:
 - Proactively share insights without being asked
 - If you notice something important in the data, mention it
 - Use dry humor occasionally — Haim appreciates it
-- Never say "I don't have access to that data" — you have tools to fetch it
 
 LANGUAGE:
 - Always respond in Hebrew
@@ -101,21 +100,21 @@ LANGUAGE:
 - Keep Telegram-friendly formatting (avoid long walls of text)
 
 WHEN ASKED ABOUT A STOCK:
-- Automatically fetch real IV data and provide full analysis
+- Read the [Context data] section — IV data is already there for you
 - State: current price, IV Rank, IV Percentile, expected move, recommended strategy
 - Always include: DTE recommendation, strike range, management rules
 - If earnings upcoming: WARN immediately
 
 WHEN ASKED ABOUT POSITIONS:
-- Pull from MongoDB and give status of each open position
+- Read the [Context data] section — open positions are already listed there
 - Calculate: current profit/loss, DTE remaining, alert if near management thresholds
 
 WHEN ASKED ABOUT THE MARKET TODAY:
-- Pull latest Agent 1 regime report from MongoDB
+- Read the [Context data] section — the regime report is already there
 - Summarize: verdict, VIX, SPY trend, key macro factors
 
 WHEN ASKED FOR TRADE IDEAS:
-- Pull latest Agent 2 report from MongoDB
+- Read the [Context data] section — latest Agent 2 recommendations are already there
 - Present the top ideas with full details
 
 WHEN ASKED GENERAL OPTIONS QUESTIONS:
@@ -123,19 +122,27 @@ WHEN ASKED GENERAL OPTIONS QUESTIONS:
 - Give concrete examples with numbers, not just theory
 
 NEVER:
-- Say you can't access real-time data (you can via your tools)
-- Give generic answers when specific data is available
+- Give generic answers when specific data is available in [Context data]
 - Recommend Naked options without warning about unlimited risk
 - Recommend any trade without first checking IV Rank
+
+---
+
+IMPORTANT — HOW YOU GET DATA:
+All real-time data is automatically fetched FOR YOU before you respond.
+It appears in the [Context data available to you] section of the message.
+You NEVER need to call tools or mention fetching data.
+Just READ the context and answer naturally in Hebrew.
+Never say "let me search" or "I'm fetching" — the data is already there.
+Never mention tool names or APIs in your response.
 
 ---
 
 CRITICAL FORMATTING RULES:
 - NEVER output XML tags like <usemcptool>, <servername>, <arguments> etc.
 - NEVER show internal tool calls or raw data structures to the user
-- You have Python functions that fetch data for you automatically — use them silently
 - Always respond in clean, formatted Hebrew text only
-- If data was fetched for you in [Context data], use it directly — do not call external tools
+- If data was fetched for you in [Context data], use it directly — do not reference tools
 - Format responses with emojis and bullet points, never with XML or JSON
 """)
 
@@ -144,17 +151,15 @@ CRITICAL FORMATTING RULES:
 
 # ── Data Fetchers ─────────────────────────────────────────────────────────────
 
-def _extract_ticker(text: str) -> Optional[str]:
-    """Extract the most likely stock ticker from user message."""
-    patterns = [
-        r'\$([A-Z]{1,5})\b',
-        r'\b([A-Z]{2,5})\b',
-    ]
-    for pattern in patterns:
+def _extract_tickers(text: str) -> list[str]:
+    """Extract ALL stock tickers from user message."""
+    found = []
+    # Match $TICKER or standalone UPPERCASE words
+    for pattern in [r'\$([A-Z]{1,5})\b', r'\b([A-Z]{2,5})\b']:
         for m in re.findall(pattern, text.upper()):
-            if m not in _SKIP_WORDS and 2 <= len(m) <= 5:
-                return m
-    return None
+            if m not in _SKIP_WORDS and 2 <= len(m) <= 5 and m not in found:
+                found.append(m)
+    return found[:5]  # max 5 tickers per message
 
 
 def _fetch_stock_data(ticker: str) -> str:
@@ -425,18 +430,19 @@ def _detect_intent(text: str) -> list[str]:
 async def _build_context(text: str) -> str:
     """Build all relevant context based on detected intents."""
     intents = _detect_intent(text)
-    ticker = _extract_ticker(text)
     context_parts = []
 
-    if "regime" in intents:
-        regime = _fetch_latest_regime()
-        if regime:
-            context_parts.append(regime)
-
-    if ticker and ("stock_data" in intents or ticker in text.upper()):
+    # Auto-fetch real IV data for ALL tickers mentioned
+    tickers = _extract_tickers(text)
+    for ticker in tickers:
         stock_ctx = _fetch_stock_data(ticker)
         if stock_ctx:
             context_parts.append(stock_ctx)
+
+    # Always add regime if market-related
+    regime = _fetch_latest_regime()
+    if regime:
+        context_parts.append(regime)
 
     if "positions" in intents:
         pos = _fetch_open_positions()
