@@ -308,19 +308,45 @@ def _fetch_latest_trade_ideas() -> str:
         return ""
 
 
+def _get_iv_summary(ticker: str) -> str:
+    """Get a one-line IV summary for a ticker."""
+    try:
+        from app.services.realtime_market_data import get_realtime_iv_data
+        d = get_realtime_iv_data(ticker)
+        if d.current_price <= 0:
+            return "— אין נתונים"
+        iv_emoji = "🔥" if d.iv_rank >= 50 else ("✅" if d.iv_rank >= 30 else "❄️")
+        strategy = "מכור פרמיה" if d.iv_rank >= 50 else ("Spread" if d.iv_rank >= 30 else "LEAPs")
+        return (f"| ${d.current_price} | IV Rank: {d.iv_rank:.0f}% {iv_emoji} "
+                f"| EM: ±${d.expected_move_30d} | → {strategy}")
+    except Exception:
+        return "— אין נתונים"
+
+
 def _fetch_finviz_candidates() -> str:
-    """Fetch current Finviz screener candidates."""
+    """Fetch Finviz candidates AND their IV data."""
     try:
         from app.services.finviz_service import FinvizService
         bullish = FinvizService.get_bullish_tickers(n=5)
         bearish = FinvizService.get_bearish_tickers(n=5)
-        parts = []
+
+        lines = []
+
         if bullish:
-            parts.append(f"Finviz שורי: {', '.join(bullish[:5])}")
+            lines.append("📈 *Finviz שוריות + IV:*")
+            for ticker in bullish[:5]:
+                iv_str = _get_iv_summary(ticker)
+                lines.append(f"• {ticker} {iv_str}")
+
         if bearish:
-            parts.append(f"Finviz דובי: {', '.join(bearish[:5])}")
-        return "\n".join(parts) if parts else ""
-    except Exception:
+            lines.append("\n📉 *Finviz דוביות + IV:*")
+            for ticker in bearish[:5]:
+                iv_str = _get_iv_summary(ticker)
+                lines.append(f"• {ticker} {iv_str}")
+
+        return "\n".join(lines) if lines else ""
+    except Exception as e:
+        logger.debug("Finviz fetch failed: %s", e)
         return ""
 
 
