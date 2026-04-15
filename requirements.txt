@@ -1,14 +1,11 @@
 # ── Web framework (FastAPI) ───────────────────────────────────────────────────
 fastapi
 uvicorn
-python-multipart
-jinja2
 
 # ── Database ──────────────────────────────────────────────────────────────────
 pymongo
 certifi
 sqlalchemy
-psycopg2-binary
 
 # ── Settings / environment ────────────────────────────────────────────────────
 python-dotenv
@@ -34,10 +31,8 @@ tradingview-screener
 requests
 beautifulsoup4
 cloudscraper
-finviz
 finvizfinance
 fredapi>=0.5.1
-polygon-api-client>=1.13.0
 scipy>=1.11.0
 optionlab>=1.0.0
 finta>=1.3

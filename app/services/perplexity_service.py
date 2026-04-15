@@ -55,6 +55,7 @@ def _query(client, question: str) -> str:
                 {"role": "user", "content": question},
             ],
             max_tokens=MAX_TOKENS,
+            timeout=15.0,
         )
         return response.choices[0].message.content.strip()
     except Exception as e:

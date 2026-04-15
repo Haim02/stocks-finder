@@ -16,10 +16,14 @@ Used by: Agent 1 (Market Regime) as additional confirmation signal
 """
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+_PCR_TTL = 1800  # 30 minutes
+_pcr_cache: dict[str, tuple] = {}  # symbol → (PCRSignal, timestamp)
 
 
 @dataclass
@@ -37,7 +41,13 @@ def get_pcr_signal(symbol: str = "SPY") -> Optional[PCRSignal]:
     """
     Calculate Put/Call Ratio from today's options volume.
     Uses the nearest expiration for most accurate sentiment reading.
+    Results cached for 30 minutes.
     """
+    cached = _pcr_cache.get(symbol)
+    if cached and (time.time() - cached[1]) < _PCR_TTL:
+        logger.debug("PCR cache hit for %s", symbol)
+        return cached[0]
+
     try:
         import yfinance as yf
 
@@ -94,7 +104,7 @@ def get_pcr_signal(symbol: str = "SPY") -> Optional[PCRSignal]:
 
         logger.info("PCR %s: %.3f → %s (%s)", symbol, pcr, signal, strength)
 
-        return PCRSignal(
+        result = PCRSignal(
             pcr=pcr,
             put_volume=total_put_vol,
             call_volume=total_call_vol,
@@ -103,6 +113,8 @@ def get_pcr_signal(symbol: str = "SPY") -> Optional[PCRSignal]:
             interpretation=interpretation,
             regime_impact=regime_impact,
         )
+        _pcr_cache[symbol] = (result, time.time())
+        return result
 
     except Exception as e:
         logger.warning("PCR calculation failed for %s: %s", symbol, e)

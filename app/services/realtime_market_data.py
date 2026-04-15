@@ -25,6 +25,11 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+# ── In-memory TTL cache ───────────────────────────────────────────────────────
+_CACHE_TTL = 3600  # 1 hour
+_iv_cache: dict[str, tuple] = {}       # ticker → (RealTimeIVData, timestamp)
+_chain_cache: dict[str, tuple] = {}    # "ticker:dte" → (OptionsChainSnapshot, timestamp)
+
 # ── Data model ────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -197,7 +202,13 @@ def get_realtime_iv_data(ticker: str) -> RealTimeIVData:
 
     Tries yfinance first (real options chain IV).
     Falls back to historical volatility proxy if options data unavailable.
+    Results are cached for 1 hour.
     """
+    cached = _iv_cache.get(ticker)
+    if cached and (time.time() - cached[1]) < _CACHE_TTL:
+        logger.debug("IV cache hit for %s", ticker)
+        return cached[0]
+
     logger.info("Fetching real-time IV data for %s...", ticker)
 
     # Step 1: Get current price
@@ -246,7 +257,7 @@ def get_realtime_iv_data(ticker: str) -> RealTimeIVData:
         ticker, current_price, current_iv_pct, iv_rank, iv_pct, em_30d, is_liquid, data_source,
     )
 
-    return RealTimeIVData(
+    result = RealTimeIVData(
         ticker=ticker,
         current_price=round(current_price, 2),
         iv_current=round(current_iv_pct, 1),
@@ -262,13 +273,21 @@ def get_realtime_iv_data(ticker: str) -> RealTimeIVData:
         data_source=data_source,
         fetched_at=datetime.utcnow().isoformat(),
     )
+    _iv_cache[ticker] = (result, time.time())
+    return result
 
 
 def get_options_chain(ticker: str, target_dte: int = 35) -> Optional[OptionsChainSnapshot]:
     """
     Get the full options chain for a ticker at the expiration closest to target_dte.
-    Used for strike selection in Agent 2.
+    Used for strike selection in Agent 2. Results cached for 1 hour.
     """
+    cache_key = f"{ticker}:{target_dte}"
+    cached = _chain_cache.get(cache_key)
+    if cached and (time.time() - cached[1]) < _CACHE_TTL:
+        logger.debug("Options chain cache hit for %s", ticker)
+        return cached[0]
+
     try:
         stock = yf.Ticker(ticker)
         expirations = stock.options
@@ -292,7 +311,7 @@ def get_options_chain(ticker: str, target_dte: int = 35) -> Optional[OptionsChai
 
         dte = (date.fromisoformat(best_exp) - today).days
 
-        return OptionsChainSnapshot(
+        snapshot = OptionsChainSnapshot(
             ticker=ticker,
             expiration=best_exp,
             dte=dte,
@@ -301,6 +320,8 @@ def get_options_chain(ticker: str, target_dte: int = 35) -> Optional[OptionsChai
             atm_strike=atm_strike,
             current_price=current_price,
         )
+        _chain_cache[cache_key] = (snapshot, time.time())
+        return snapshot
 
     except Exception as e:
         logger.warning("Options chain fetch failed for %s: %s", ticker, e)

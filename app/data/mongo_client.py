@@ -31,6 +31,7 @@ class MongoDB:
                 tlsCAFile=certifi.where(),
                 serverSelectionTimeoutMS=10_000,
                 connectTimeoutMS=10_000,
+                maxPoolSize=10,
             )
         return cls._client[settings.DB_NAME]
 

@@ -766,7 +766,20 @@ class FreeChatHandler:
 
     def reload_memory(self):
         self._system_prompt = _build_system_prompt()
+        self._memory_mtime = MEMORY_PATH.stat().st_mtime if MEMORY_PATH.exists() else 0.0
         logger.info("System prompt reloaded")
+
+    def _get_system_prompt(self) -> str:
+        """Return system prompt, auto-reloading if MEMORY.md was modified."""
+        try:
+            mtime = MEMORY_PATH.stat().st_mtime if MEMORY_PATH.exists() else 0.0
+            if not hasattr(self, "_memory_mtime") or mtime > self._memory_mtime:
+                self._system_prompt = _build_system_prompt()
+                self._memory_mtime = mtime
+                logger.info("System prompt auto-reloaded (MEMORY.md changed)")
+        except Exception:
+            pass
+        return self._system_prompt
 
     async def handle(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not update.message.text:
@@ -802,7 +815,7 @@ class FreeChatHandler:
             response = self._client.messages.create(
                 model=CLAUDE_MODEL,
                 max_tokens=MAX_TOKENS,
-                system=self._system_prompt,
+                system=self._get_system_prompt(),
                 messages=self._memory.get(user_id),
             )
             reply = response.content[0].text

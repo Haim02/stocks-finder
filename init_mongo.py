@@ -21,6 +21,21 @@ def init_db():
     except Exception as e:
         print(f"⚠️ Index 'news_date' info: {e}")
 
+    # 3-7. TTL indexes — auto-cleanup old documents
+    ttl_indexes = [
+        ("daily_market_sentiment",     "timestamp",  30 * 24 * 3600),
+        ("market_regime_reports",      "timestamp",  30 * 24 * 3600),
+        ("options_strategist_reports", "timestamp",  14 * 24 * 3600),
+        ("agent_run_log",              "started_at",  7 * 24 * 3600),
+        ("training_events",            "timestamp",  90 * 24 * 3600),
+    ]
+    for collection, field, ttl in ttl_indexes:
+        try:
+            db[collection].create_index(field, expireAfterSeconds=ttl)
+            print(f"✅ TTL index '{field}' on '{collection}' ({ttl // 86400}d).")
+        except Exception as e:
+            print(f"⚠️ TTL index '{collection}.{field}' info: {e}")
+
     print("🚀 MongoDB setup complete!")
 
 if __name__ == "__main__":
