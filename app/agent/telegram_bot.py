@@ -1542,6 +1542,26 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 0DTE Scanner — /zerod command
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def zerod_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """0DTE analysis and setup recommendation."""
+    if not _is_authorized(update):
+        return
+    symbols = [a.upper() for a in context.args] if context.args else ["SPY", "QQQ"]
+    await update.message.reply_text(f"📅 מנתח 0DTE עבור {', '.join(symbols)}...")
+    try:
+        from app.services.zero_dte_scanner import analyze_zero_dte, format_zero_dte_report
+        for sym in symbols[:3]:
+            setup = analyze_zero_dte(sym)
+            msg = format_zero_dte_report(setup)
+            await update.message.reply_text(msg, parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Agent 3 Commands — Position tracking & risk management
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1749,6 +1769,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("leaderboard",  cmd_leaderboard))
     app.add_handler(CommandHandler("regime",        cmd_regime))
     app.add_handler(CommandHandler("strategist",   cmd_strategist))
+    app.add_handler(CommandHandler("zerod",        zerod_command))
 
     # ── Agent 3 — Position tracking & risk management ─────────────────────────
     app.add_handler(CommandHandler("positions",    positions_command))

@@ -629,6 +629,12 @@ def _detect_intent(text: str) -> list[str]:
     if any(k in text_lower for k in realtime_keywords):
         intents.append("realtime")
 
+    # 0DTE specific
+    zero_dte_keywords = ['0dte', '0 dte', 'אפס', 'intraday', 'straddle',
+                         'gamma', 'גאמא', 'scalp', 'zero dte']
+    if any(k in text_lower for k in zero_dte_keywords):
+        intents.append("zero_dte")
+
     return intents
 
 
@@ -688,6 +694,16 @@ async def _build_context(text: str) -> str:
             oai = _fetch_openai_fact(text)
             if oai:
                 context_parts.append(oai)
+
+    if "zero_dte" in intents:
+        try:
+            from app.services.zero_dte_scanner import analyze_zero_dte, format_zero_dte_report
+            for sym in ["SPY", "QQQ"]:
+                setup = analyze_zero_dte(sym)
+                if setup:
+                    context_parts.append(format_zero_dte_report(setup))
+        except Exception:
+            pass
 
     return "\n\n---\n\n".join(context_parts) if context_parts else ""
 

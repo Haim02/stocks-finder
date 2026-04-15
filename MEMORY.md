@@ -1178,3 +1178,137 @@ If a stock shows > 2× its normal IV → always investigate WHY before recommend
 ---
 
 *Last updated: April 2026*
+
+---
+
+## 📚 0DTE TRADING — GAMMA SCALPING KNOWLEDGE
+### Source: alpacahq/gamma-scalping + practical 0DTE methodology (April 2026)
+
+---
+
+### WHAT IS 0DTE TRADING
+
+0DTE = Zero Days To Expiration = options that expire TODAY.
+Available every trading day on: SPX, SPY, QQQ, AAPL, TSLA, NVDA (weekly)
+
+Why 0DTE is different from regular options:
+- Gamma is MASSIVE — option can go from OTM to ITM in minutes
+- Theta decay is extreme — loses value every hour, not every day
+- Bid-ask spreads are tighter (more liquid near expiration)
+- No overnight risk — closes same day
+- Requires active monitoring — NOT a set-and-forget strategy
+
+---
+
+### GAMMA SCALPING — THE CORE CONCEPT
+
+Strategy: Buy Straddle (ATM Call + ATM Put) → Delta hedge → profit from realized volatility
+
+The race between:
+- Gamma (your profit engine) → profits from price movement in EITHER direction
+- Theta (your cost) → daily time decay eating your position
+
+WHEN IT WORKS: Realized Volatility > Implied Volatility
+WHEN IT FAILS: Stock sits still → Theta kills you
+
+Straddle scoring formula (from Alpaca repo):
+Score = (abs(Theta) × Theta_Weight + Transaction_Cost) / Gamma
+→ Choose straddle with LOWEST score = best Gamma per dollar of decay
+
+---
+
+### 0DTE PRACTICAL RULES
+
+Entry timing:
+- NEVER enter in first 15-30 minutes (too chaotic, spreads wide)
+- Best entry window: 10:00-11:00 AM ET (09:30-10:00 Israel time is 16:30-17:00)
+- Wait for market to show direction first
+
+For SPY/SPX specifically (from research):
+- Wait 45 min after open before entering
+- Look for: VIX > 20 = wider strikes needed, smaller size
+- VIX > 25 = enter later (11:00-11:30 AM ET), reduce size by 50%
+- VIX > 30 = skip 0DTE entirely, too dangerous
+
+Position sizing for 0DTE:
+- MAX 1-2% of account per 0DTE trade (highly speculative)
+- Never more than 2 0DTE positions simultaneously
+- Always use Credit Spreads (defined risk) — NOT naked options
+
+0DTE Credit Spread rules:
+- Width: $1-3 (SPY) or $5-10 (SPX)
+- Delta of short strike: 0.10-0.20 (further OTM than normal)
+- Target credit: minimum 20% of spread width
+- Close at: 50% profit OR 200% loss
+- Hard close: 30 minutes before market close (no exceptions)
+
+---
+
+### 0DTE STRATEGY SELECTION BY TIME OF DAY
+
+| Time (Israel) | Time (ET) | Strategy | Why |
+|--------------|-----------|----------|-----|
+| 16:30-17:00 | 09:30-10:00 | WAIT | Too volatile, bad fills |
+| 17:00-18:00 | 10:00-11:00 | Bull Put / Bear Call | Direction established |
+| 18:00-20:00 | 11:00-13:00 | Iron Condor | Mid-day range trading |
+| 20:00-21:30 | 13:00-14:30 | Avoid new positions | Theta risk increasing |
+| 21:30-22:00 | 14:30-15:00 | Close ALL positions | Too close to expiration |
+
+---
+
+### DELTA HEDGING CONCEPT (from Alpaca repo)
+
+When portfolio delta drifts from 0 by more than THRESHOLD → hedge by buying/selling underlying
+
+Key insight: Gamma Scalping profits come from repeatedly hedging small moves
+The HEDGING_DELTA_THRESHOLD is the most important parameter:
+- Too tight → over-trade → transaction costs kill you
+- Too loose → miss volatility → Theta kills you
+
+Practical threshold for SPY 0DTE: ±2-3 delta per 100 shares equivalent
+
+---
+
+### GAMMA RISK WARNING ⚠️
+
+Near expiration, Gamma explodes. A 1% move in SPY can flip your position from profitable to max loss.
+
+Warning signs that 0DTE position is in danger:
+1. Underlying moves > 0.5% against you within 1 hour
+2. Your short strike is within $1 of current price with < 2 hours left
+3. VIX spikes > 5% intraday
+
+Exit rules when in danger:
+1. If loss reaches 150% of credit → EXIT immediately
+2. If short strike is breached → EXIT immediately
+3. NEVER hold to expiration if tested
+
+---
+
+### HOW AGENT 1 USES THIS FOR 0DTE DECISIONS
+
+When VIX < 18 → GREEN → 0DTE Iron Condor on SPY (10:30-11:00 AM ET entry)
+When VIX 18-22 → YELLOW → 0DTE Bull Put OR Bear Call only (directional)
+When VIX 22-28 → ORANGE → wait until 11:00 AM ET, reduce size 50%
+When VIX > 28 → RED → skip 0DTE, stick to monthly options only
+
+---
+
+### AGENT INSTRUCTIONS — 0DTE SPECIFIC
+
+When Haim asks about 0DTE:
+1. ALWAYS ask: "מה השעה עכשיו?" — timing is critical for 0DTE
+2. Check VIX level first — determines sizing and strategy
+3. State the expected move for today (EM daily = IV × Price × √(1/252))
+4. Recommend strikes OUTSIDE the expected daily move
+5. Remind: close 30 min before market close (22:00 Israel time)
+6. Never recommend 0DTE with earnings same day
+7. Hard rule: max 1-2% account size per 0DTE trade
+
+When analyzing a 0DTE setup:
+- State: current time, VIX, SPY price, daily expected move
+- Recommend: specific strikes, credit target, stop loss
+- Always include: "סגור לפני 22:00 שעון ישראל — ללא יוצא מהכלל"
+
+*Source: alpacahq/gamma-scalping repo + 0DTE research*
+*Added: April 2026*
