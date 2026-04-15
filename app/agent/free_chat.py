@@ -241,6 +241,15 @@ def _fetch_stock_data(ticker: str) -> str:
     if tech:
         results.append(tech)
 
+    # 6. FinTA technical indicators (extended — MACD, ADX, Stochastic, BB)
+    try:
+        from app.services.technical_indicators import get_technical_snapshot, format_technical_hebrew
+        finta_snap = get_technical_snapshot(ticker)
+        if finta_snap:
+            results.append(format_technical_hebrew(finta_snap))
+    except Exception:
+        pass
+
     return "\n\n".join(results) if results else ""
 
 
@@ -531,6 +540,18 @@ def _fetch_market_sentiment() -> str:
         return ""
 
 
+def _fetch_pcr_signal() -> str:
+    """Fetch Put/Call Ratio as market sentiment indicator."""
+    try:
+        from app.services.pcr_signal import get_pcr_signal, format_pcr_hebrew
+        pcr = get_pcr_signal("SPY")
+        if pcr:
+            return format_pcr_hebrew(pcr)
+        return ""
+    except Exception:
+        return ""
+
+
 def _fetch_macro_calendar() -> str:
     """
     Fetch today's economic calendar and earnings via Perplexity.
@@ -680,6 +701,11 @@ async def _build_context(text: str) -> str:
         sent = _fetch_market_sentiment()
         if sent:
             context_parts.append(sent)
+
+    if "sentiment" in intents or "regime" in intents:
+        pcr = _fetch_pcr_signal()
+        if pcr:
+            context_parts.append(pcr)
 
     if "regime" in intents or "realtime" in intents:
         macro = _fetch_macro_calendar()

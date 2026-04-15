@@ -329,6 +329,20 @@ def _build_hebrew_summary(
     else:
         lines.append(f"✅ Agent 2 מופעל — סיזינג מלא")
 
+    # PCR signal — options market sentiment
+    try:
+        from app.services.pcr_signal import get_pcr_signal, format_pcr_hebrew
+        pcr = get_pcr_signal("SPY")
+        if pcr:
+            if pcr.regime_impact == "GREEN_boost" and report.verdict == "YELLOW":
+                logger.info("PCR is bullish — noted alongside YELLOW verdict")
+            elif pcr.regime_impact == "RED_boost" and report.verdict == "GREEN":
+                logger.info("PCR is bearish — noted alongside GREEN verdict")
+            lines.append("")
+            lines.append(format_pcr_hebrew(pcr))
+    except Exception as e:
+        logger.debug("PCR signal failed: %s", e)
+
     return "\n".join(lines)
 
 

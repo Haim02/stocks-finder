@@ -488,6 +488,17 @@ def build_dataset(tickers: list[str]) -> tuple[pd.DataFrame, pd.Series]:
             df          = extract_features(df)
             df          = add_sentiment_features(df, ticker)
             df          = add_macro_features(df)          # FRED: fed_rate, cpi_yoy
+
+            # Add FinTA technical indicator features (latest snapshot — constant per ticker)
+            try:
+                from app.services.technical_indicators import get_xgboost_features
+                tech_features = get_xgboost_features(ticker)
+                if tech_features:
+                    for key, val in tech_features.items():
+                        df[key] = val
+            except Exception:
+                pass
+
             df["label"] = label_rows(df)
 
             valid_mask  = df[FEATURE_COLS + ["label"]].notna().all(axis=1)
