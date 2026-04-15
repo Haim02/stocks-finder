@@ -177,12 +177,15 @@ def _calc_iv_rank_from_history(ticker: str, current_iv: float) -> tuple[float, f
 def _calc_expected_move(price: float, iv_pct: float, dte: int) -> float:
     """
     Expected Move = Price × IV × √(DTE/365)
-    iv_pct is the IV percentage (e.g., 0.25 for 25%).
-    Returns ±$ amount for 1 standard deviation.
+    iv_pct is decimal (0.25 = 25%) OR percentage (25.0) — handle both.
     """
-    if iv_pct <= 0 or price <= 0:
+    if price <= 0 or dte <= 0:
         return 0.0
-    em = price * iv_pct * math.sqrt(dte / 365)
+    # Normalize: if iv_pct > 2.0 it's already in percentage form
+    iv = iv_pct / 100.0 if iv_pct > 2.0 else iv_pct
+    if iv <= 0:
+        return 0.0
+    em = price * iv * (dte / 365) ** 0.5
     return round(em, 2)
 
 
@@ -234,8 +237,9 @@ def get_realtime_iv_data(ticker: str) -> RealTimeIVData:
     # Step 3: Calculate IV Rank and Percentile
     iv_rank, iv_pct, iv_high, iv_low = _calc_iv_rank_from_history(ticker, current_iv_pct)
 
-    # Step 4: Expected move (30 days)
-    em_30d = _calc_expected_move(current_price, current_iv_raw, 30)
+    # Step 4: Expected move (30 days) — use ATM IV if available, else rolling vol
+    iv_for_em = current_iv_raw if current_iv_raw > 0 else (current_iv_pct / 100)
+    em_30d = _calc_expected_move(current_price, iv_for_em, 30)
 
     logger.info(
         "%s: price=$%.2f IV=%.1f%% IVR=%.1f IVP=%.1f EM30d=±$%.2f liquid=%s source=%s",

@@ -100,10 +100,16 @@ LANGUAGE:
 - Keep Telegram-friendly formatting (avoid long walls of text)
 
 WHEN ASKED ABOUT A STOCK:
-- Read the [Context data] section — IV data is already there for you
-- State: current price, IV Rank, IV Percentile, expected move, recommended strategy
-- Always include: DTE recommendation, strike range, management rules
-- If earnings upcoming: WARN immediately
+You receive pre-fetched data in [Context data]. Use ALL of it:
+- IV data: state IV Rank, Expected Move, liquidity
+- Yahoo Finance: CHECK EARNINGS DATE FIRST — if earnings < 14 days → warn immediately
+- Technical: state RSI, trend, support/resistance
+- News: mention if relevant to trade decision
+- Then recommend strategy based on IV Rank + technical context
+
+EARNINGS WARNING RULE (non-negotiable):
+If earnings are within 14 days → always say this first:
+"⚠️ יש Earnings בעוד X ימים — שקול להמתין או להשתמש באסטרטגיית Earnings בלבד"
 
 WHEN ASKED ABOUT POSITIONS:
 - Read the [Context data] section — open positions are already listed there
@@ -225,7 +231,154 @@ def _fetch_stock_data(ticker: str) -> str:
     except Exception:
         pass
 
+    # 4. Yahoo Finance enrichment (earnings, news, stats)
+    yahoo_data = _fetch_yahoo_enrichment(ticker)
+    if yahoo_data:
+        results.append(yahoo_data)
+
+    # 5. Technical analysis (RSI, trend, support/resistance)
+    tech = _fetch_technical_analysis(ticker)
+    if tech:
+        results.append(tech)
+
     return "\n\n".join(results) if results else ""
+
+
+def _fetch_yahoo_enrichment(ticker: str) -> str:
+    """
+    Fetch earnings dates, recent news, and key stats from yfinance.
+    This is the 'game changer' data that prevents trading into earnings.
+    """
+    try:
+        import yfinance as yf
+        from datetime import date as _date
+
+        stock = yf.Ticker(ticker)
+        lines = [f"[Yahoo Finance — {ticker}]"]
+
+        # 1. Earnings date (CRITICAL)
+        try:
+            cal = stock.calendar
+            if cal is not None and not cal.empty:
+                if "Earnings Date" in cal.index:
+                    earn_dates = cal.loc["Earnings Date"]
+                    if hasattr(earn_dates, "iloc"):
+                        earn_date = earn_dates.iloc[0]
+                    else:
+                        earn_date = earn_dates
+                    if hasattr(earn_date, "date"):
+                        earn_date = earn_date.date()
+                    days_until = (earn_date - _date.today()).days
+                    if 0 <= days_until <= 45:
+                        warn = "⚠️ DANGER" if days_until <= 7 else ("⚠️ זהירות" if days_until <= 14 else "📅")
+                        lines.append(f"Earnings: {earn_date} ({days_until} ימים) {warn}")
+                        if days_until <= 7:
+                            lines.append("❌ אל תמכור אופציות לפני Earnings — IV crush / gap risk!")
+                    else:
+                        lines.append(f"Earnings: {earn_date} ({days_until} ימים) ✅ בטוח")
+        except Exception:
+            pass
+
+        # 2. Key stats
+        try:
+            info = stock.info
+            pe = info.get("trailingPE")
+            market_cap = info.get("marketCap", 0)
+            sector = info.get("sector", "")
+            short_pct = info.get("shortPercentOfFloat", 0)
+
+            if market_cap:
+                cap_str = f"${market_cap/1e9:.1f}B" if market_cap > 1e9 else f"${market_cap/1e6:.0f}M"
+                lines.append(f"Market Cap: {cap_str} | Sector: {sector}")
+            if pe:
+                lines.append(f"P/E: {pe:.1f}")
+            if short_pct and short_pct > 0.10:
+                lines.append(f"⚠️ Short Interest: {short_pct*100:.1f}% (גבוה)")
+        except Exception:
+            pass
+
+        # 3. Recent news headlines (last 3)
+        try:
+            news = stock.news
+            if news:
+                lines.append("📰 חדשות אחרונות:")
+                for item in news[:3]:
+                    title = item.get("title", "")
+                    if title:
+                        lines.append(f"  • {title[:80]}")
+        except Exception:
+            pass
+
+        # 4. 52-week range
+        try:
+            info = stock.info
+            low52 = info.get("fiftyTwoWeekLow")
+            high52 = info.get("fiftyTwoWeekHigh")
+            price = info.get("currentPrice") or info.get("regularMarketPrice")
+            if low52 and high52 and price:
+                pct_from_low = (price - low52) / (high52 - low52) * 100
+                lines.append(f"52W: ${low52:.2f} — ${high52:.2f} | עכשיו: {pct_from_low:.0f}% מהשפל")
+        except Exception:
+            pass
+
+        return "\n".join(lines) if len(lines) > 1 else ""
+
+    except Exception as e:
+        logger.debug("Yahoo enrichment failed for %s: %s", ticker, e)
+        return ""
+
+
+def _fetch_technical_analysis(ticker: str) -> str:
+    """
+    Calculate RSI, trend, support/resistance from yfinance price history.
+    No TradingView API needed — pure yfinance.
+    """
+    try:
+        import yfinance as yf
+
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period="3mo")
+        if hist.empty or len(hist) < 20:
+            return ""
+
+        closes = hist["Close"]
+        volumes = hist["Volume"]
+
+        # RSI (14-day)
+        delta = closes.diff()
+        gain = delta.where(delta > 0, 0).rolling(14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+        rs = gain / loss
+        rsi = round(float(100 - (100 / (1 + rs.iloc[-1]))), 1)
+        rsi_label = "⚠️ Overbought" if rsi > 70 else ("⚠️ Oversold" if rsi < 30 else "✅ Normal")
+
+        # Trend (20 vs 50 MA)
+        ma20 = float(closes.rolling(20).mean().iloc[-1])
+        ma50 = float(closes.rolling(50).mean().iloc[-1])
+        current = float(closes.iloc[-1])
+        trend = "🟢 שורי" if ma20 > ma50 else "🔴 דובי"
+
+        # Support & Resistance (20-day low/high)
+        support = round(float(closes.rolling(20).min().iloc[-1]), 2)
+        resistance = round(float(closes.rolling(20).max().iloc[-1]), 2)
+
+        # Volume trend
+        avg_vol = float(volumes.rolling(10).mean().iloc[-1])
+        last_vol = float(volumes.iloc[-1])
+        vol_note = "📈 Volume גבוה" if last_vol > avg_vol * 1.5 else ""
+
+        return (
+            f"[ניתוח טכני — {ticker}]\n"
+            f"RSI(14): {rsi} {rsi_label}\n"
+            f"Trend: {trend} (MA20: ${ma20:.2f} | MA50: ${ma50:.2f})\n"
+            f"Support: ${support} | Resistance: ${resistance}\n"
+            f"מחיר נוכחי: ${current:.2f} "
+            f"({'קרוב ל-Resistance ⚠️' if current > resistance*0.97 else 'בטווח בטוח ✅'})"
+            f"{' | ' + vol_note if vol_note else ''}"
+        )
+    except Exception as e:
+        logger.debug("Technical analysis failed for %s: %s", ticker, e)
+        return ""
 
 
 def _fetch_open_positions() -> str:
@@ -378,6 +531,34 @@ def _fetch_market_sentiment() -> str:
         return ""
 
 
+def _fetch_macro_calendar() -> str:
+    """
+    Fetch today's economic calendar and earnings via Perplexity.
+    Called automatically when user asks market/macro questions.
+    """
+    try:
+        from app.services.perplexity_service import PerplexityService
+        from datetime import date as _date
+        svc = PerplexityService()
+        if not svc.is_available():
+            return ""
+
+        today = _date.today().strftime("%B %d, %Y")
+        query = (
+            f"Economic calendar for {today}: "
+            f"1) Any FOMC Fed meetings or Fed speeches today or this week? "
+            f"2) CPI, PPI, NFP, or other major economic data releases? "
+            f"3) Major S&P 500 earnings reports this week? "
+            f"Answer in 3 bullet points, be specific with dates and times."
+        )
+        answer = svc.ask(query)
+        if answer:
+            return f"[לוח אירועים מקרו — {today}]\n{answer}"
+        return ""
+    except Exception:
+        return ""
+
+
 def _fetch_perplexity(question: str) -> str:
     """Fetch real-time answer from Perplexity."""
     try:
@@ -493,6 +674,11 @@ async def _build_context(text: str) -> str:
         sent = _fetch_market_sentiment()
         if sent:
             context_parts.append(sent)
+
+    if "regime" in intents or "realtime" in intents:
+        macro = _fetch_macro_calendar()
+        if macro:
+            context_parts.append(macro)
 
     if "realtime" in intents:
         pplx = _fetch_perplexity(text)
