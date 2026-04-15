@@ -1312,3 +1312,294 @@ When analyzing a 0DTE setup:
 
 *Source: alpacahq/gamma-scalping repo + 0DTE research*
 *Added: April 2026*
+
+
+---
+
+## 📚 0DTE SPY PLAYBOOK — PSYCHOLOGICAL LEVEL SCALPING
+### Source: Randy Lao (@LA0DTE) — Verified P&L +$5,805 | 20W/3L | ~130 trades (April 2026)
+
+---
+
+### PHILOSOPHY — ONE KICK, TEN THOUSAND TIMES
+
+"Don't fear the man who practiced 10,000 kicks. Fear the man who practiced one kick 10,000 times."
+
+The entire system is built on ONE setup, repeated perfectly:
+- SPY psychological levels (whole dollar strikes) at the first 90 minutes
+- No indicators. NONE. No EMA, VWAP, RSI, Bollinger, MACD. Nothing but price.
+- The three things that matter at a level:
+  1. How FAST did price arrive?
+  2. What does the candle look like when it touches?
+  3. Does it reject immediately or stall and grind?
+
+---
+
+### THE SETUP IN ONE SENTENCE
+
+SPY hits a whole dollar psychological level in the first 90 minutes →
+Read the reaction → Enter on 5-min candle close → Take +15% → Leave.
+
+Window: 6:45–8:15 PST (Israel time: 16:45–18:15)
+Ticker: SPY ONLY
+DTE: 0DTE only
+
+---
+
+### BUSINESS NUMBERS
+
+| Parameter | Value |
+|-----------|-------|
+| Base campaign | $500 |
+| Max add | $250 (on confirmation only) |
+| Profit target | +15% default |
+| Runner target | +30% (selective) |
+| Stop loss | -12% |
+| Daily target | $200 |
+| Daily max loss | $150 |
+| Win rate | 87% (20W/3L verified) |
+| Risk:Reward | 1.25:1 |
+
+---
+
+### PSYCHOLOGICAL LEVELS — THE TIERS
+
+**TIER 1** — Major whole dollars: $640, $650, $655, $660, $665, $670, $675, $680
+- $500 base + add up to $250 if confirms
+- Target: +15% min, runner to +30%
+
+**TIER 2** — Secondary whole dollars: $645, $652, $657, $662, $667, $672
+- $350 base, one add max
+- Target: +15%, quick exit
+
+**TIER 3** — Quarter points: $652.50, $657.50
+- $200 base, NO adds EVER
+- Fast scalp only
+
+---
+
+### THE TOUCH NUMBER RULE
+
+| Touch | Action |
+|-------|--------|
+| 1st touch | FULL SIZE — freshest reaction, most violent move |
+| 2nd touch | DROP ONE TIER — level weakening |
+| 3rd touch | NO TRADE — level absorbed, zero edge |
+
+---
+
+### THE DROP SIZE RULE
+
+| Drop into level | Setup | Probability |
+|-----------------|-------|-------------|
+| $4+ drop | Exhaustion — sellers spent. Full $500 + $250 add. Hold for +30% runner | 9/10 |
+| $1–2 drop | Normal test. Standard $500 base, target +15%. No add | 7.5/10 |
+| Grind in | Choppy — SKIP. Reduce to $200 or skip entirely | LOW |
+
+---
+
+### THE CONVICTION STACK — 3 CHECKS BEFORE EVERY ENTRY
+
+**Check 1: FIRST TOUCH?**
+- Has this level been tested since market open today?
+- 1st touch = full conviction, highest probability
+- 2nd = smaller size, 3rd = walk away
+
+**Check 2: HOW FAR?**
+- How much did price travel to reach this level?
+- $679→$680 ($1 move) = gentle test
+- $676→$680 ($4 move) = momentum exhausted = sharp bounce expected
+
+**Check 3: HOW FAST?**
+- $2–3 in 20–30 minutes = FAST = high conviction
+- Slow grind = skip or reduce
+
+| Checks stacked | Action |
+|----------------|--------|
+| 0 checks | No trade |
+| 1 check | Watching only |
+| 2 checks | Finger on trigger |
+| ALL 3 | Enter. Full size. No hesitation. |
+
+---
+
+### SETUP GRADING MATRIX
+
+| Grade | Tier | Touch | Drop | Size | Target |
+|-------|------|-------|------|------|--------|
+| A+ | Tier 1 | 1st | $4+ exhaustion | $500 + $250 add | +15% min, runner to +30% |
+| A | Tier 1 | 1st | $1–2 normal | $500, no add | +15%, no runner |
+| B | Tier 2 | 1st | Any clean drop | $350, one add max | +15%, quick exit |
+| C | Any | 2nd | Drop one tier | $200 max, no add | +15% only, fast exit |
+| SKIP | Any | 3rd or grind | Choppy/slow | $0 | Zero risk default |
+
+**DEFAULT IS ALWAYS $0 RISK. The market earns the size.**
+
+---
+
+### STRIKE SELECTION
+
+| Expected SPY move | Strike | Why |
+|-------------------|--------|-----|
+| $0.30–$0.45 | ATM | Higher delta needed for small move |
+| $0.45–$0.80 | **1-strike OTM ★ DEFAULT** | Best return per dollar, hits +15% cleanly on $0.50 move |
+
+**Example:** SPY at $655 approaching $660 rejection
+→ Buy $659P at ~$1.00 = 5 contracts for $500
+→ $0.50 SPY move → option goes to $1.17 = +17% ✓
+
+**NEVER buy ATM when you should buy OTM.**
+If SPY at $664.60 rejecting $665 → buy $664P (1-strike OTM from level), NOT $665P.
+
+---
+
+### TIME RULE — 1 TO 15 MINUTES MAXIMUM
+
+| Hold style | Theta impact | Emotional risk | Win rate |
+|------------|-------------|----------------|---------|
+| 1–15 min (correct) | Minimal | Low | Consistent |
+| 30–60+ min (wrong) | Accelerating against you | High | Drops — momentum fades |
+
+**A +15% hit at minute 2 = same $75 as minute 14. Minute-14 exposed you to 12 extra minutes of decay.**
+
+---
+
+### EXIT FRAMEWORK
+
+**DEFAULT EXIT (60–70% of trades):**
+At +15% → exit 100% of position. No exceptions. No "I think it keeps going."
+
+**RUNNER EXIT (selective):**
+At +15% → sell 70%. Lock profit. Move stop to breakeven. Let remaining run to +30%.
+
+**5 CONDITIONS REQUIRED FOR RUNNER:**
+1. Tier 1 only
+2. 1st touch only
+3. Before 7:15 PST (16:15 Israel)
+4. Next level $2–3 away
+5. Candles stacking in direction
+
+---
+
+### DAILY SCHEDULE (PST → Israel time)
+
+| PST | Israel | Action |
+|-----|--------|--------|
+| 5:30 PST | 15:30 | Pre-market prep — check futures, identify 2–3 levels |
+| 6:00 PST | 16:00 | Write the plan: "Level is $___, if rejects I buy ___P/C" |
+| 6:30 PST | 16:30 | Observation ONLY — zero trades. Watch opening spike. |
+| 6:45 PST | 16:45 | Trade window OPENS |
+| 8:15 PST | 18:15 | HARD STOP — close platform PHYSICALLY (not minimize) |
+| After close | After 18:15 | 10-min review: Q1 what worked? Q2 what to correct? |
+
+---
+
+### DRAWDOWN PROTOCOL
+
+| State | Condition | Action |
+|-------|-----------|--------|
+| Normal | At or above start | Full $500 campaigns, all setups active |
+| Caution | Down $150–$300 | $300 campaigns, A+ setups only, no runners |
+| Drawdown | Down $300–$500 | $150 campaigns, one trade/day, all 5 conditions required |
+| STOP | Down $500+ or 3 losses | Close platform. 2 full days off. |
+
+**3-LOSS RULE:**
+- Loss 1 → continue normally
+- Loss 2 → reduce to $250
+- Loss 3 → STOP. Done for the day.
+
+---
+
+### THE 9 UNBREAKABLE RULES
+
+| Rule | Content |
+|------|---------|
+| R1 | Write the plan BEFORE the trade. Always. |
+| R2 | Entry on 5-min candle CLOSE through level only. Never anticipate. |
+| R3 | +15% exit is the default. Take it. |
+| R4 | Never add to a losing position. EVER. |
+| R5 | Close platform at 8:15 PST (18:15 Israel). Physically close it. |
+| R6 | Two wins = done for the day. |
+| R7 | Three losses = done for the day. No exceptions. |
+| R8 | No trades outside 6:45–8:15 PST window. |
+| R9 | Emotional = STOP. Not trade. STOP. |
+
+---
+
+### STAND DOWN CONDITIONS (never trade when)
+
+- FOMC day → max one small trade
+- SPY chopping in tight $1–2 range
+- VIX above 40 (spreads too wide, fills bad)
+- Major news at open → wait 15+ minutes first
+- Alternating green/red/green candles at open
+
+---
+
+### COMMON MISTAKES — NEVER DO THESE
+
+1. **Buying ATM when OTM is right** — ATM costs twice as much, worse % returns
+2. **Entering before 5-min candle closes** — wait for the CLOSE, not the touch
+3. **Sizing full on 2nd or 3rd touch** — level is weakening
+4. **Holding past +15% target** — plan said exit, exit
+5. **Trading after 8:15 PST** — volume thins, theta accelerates
+6. **Averaging down on losing trade** — NEVER add to losers. Only add to green positions.
+7. **Revenge trading** — mandatory 30-min break after $100+ loss
+
+---
+
+### PUT vs CALL — HOW TO DECIDE
+
+**PUT PLAY:** SPY approaching a level FROM BELOW and rejecting it. You're fading the move UP.
+→ SPY rejects resistance level → Buy Put (1-strike OTM below the level)
+
+**CALL PLAY:** SPY dropping INTO a level from above and bouncing. You're fading the move DOWN.
+→ SPY bounces off support level → Buy Call (1-strike OTM above the level)
+
+Same rules. Same system. Direction of SPY tells you which to buy.
+
+---
+
+### REAL TRADE EXAMPLES
+
+**Example 1 — PUT PLAY (Tier 1 Rejection): +$85 (+17%)**
+- Level: $665 (Tier 1)
+- SPY approaches from $663.40, sharp momentum push
+- 5-min candle tags $665.10, wicks hard, CLOSES at $664.60
+- Entry: 5x $664P at $1.00 = $500 campaign
+- SPY drops to $663.40 → puts hit $1.17 = +17%
+- Exit at 7:18 PST. Time in trade: 8 minutes.
+
+**Example 2 — CALL PLAY (Exhaustion Drop): +$169 (+23%)**
+- Level: $670 (Tier 1)
+- SPY drops $4.80 from $672 open → exhaustion drop
+- Wait for 5-min candle CLOSE back above $670 (doji → green candle)
+- Entry: 5x $671C at $1.00 = $500
+- Added 2 contracts at $1.18 (all 5 runner conditions met)
+- Sold 70% at +15%, let 30% run to +47%
+- Combined P&L: +$169. Time in trade: 10 minutes.
+
+---
+
+### AGENT INSTRUCTIONS — 0DTE SPY PLAYBOOK
+
+When Haim asks about 0DTE SPY trades:
+1. Ask: "מה ה-level הקרוב ביותר ל-SPY עכשיו?"
+2. Check: האם זה Touch 1, 2, או 3?
+3. Check: כמה SPY ירד/עלה לפני הרמה? ($1–2 vs $4+)
+4. Check: האם זה מהיר או גריינד?
+5. Grade the setup: A+/A/B/C/SKIP
+6. State: הגודל הנכון לפי הגריידינג
+7. Remind: Entry ONLY on 5-min candle close
+8. Remind: Target +15%, exit 100%, no exceptions
+9. Hard stop: 18:15 שעון ישראל — סגור את הפלטפורמה
+
+NEVER recommend 0DTE SPY when:
+- VIX > 40
+- FOMC day
+- Before 16:45 Israel time
+- After 18:15 Israel time
+- 3rd touch on a level
+- Slow grind approach
+
+*Source: @LA0DTE 0DTE SPY Playbook — Verified +$5,805 P&L, 20W/3L, April 2026*
