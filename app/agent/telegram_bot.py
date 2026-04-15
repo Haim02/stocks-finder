@@ -1353,40 +1353,52 @@ def _run_gex_sync(ticker: str, max_dte: int) -> str:
     return format_gex_telegram(result)
 
 
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show all available bot commands."""
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show all available commands."""
     if not _is_authorized(update):
         return
-    await update.message.reply_text(
-        "🤖 *בוט stocks-finder — כל הפקודות*\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "📊 *סריקות (שולחות דוח במייל):*\n"
-        "/dailyscan — סריקה יומית מלאה עם ניתוח טכני\n"
-        "/optionsscan — דוח אופציות יומי (SPX + מניות)\n"
-        "/smartmoney — זיהוי צבירה מוסדית (Wyckoff)\n"
-        "/news — סריקת חדשות שוק אחרונות\n"
-        "/intelligence — ניתוח מאקרו + רוטציית סקטורים\n"
-        "/otc — סורק מניות OTC\n\n"
-        "🎯 *אסטרטגיות אופציות:*\n"
-        "/strategies — S\\&P 500 + Nasdaq 100, מתחלף יומי\n"
-        "/strategies AAPL TSLA NVDA — מניות ספציפיות\n"
-        "/analyze טיקר — ניתוח מעמיק: IV + אסטרטגיה + ML\n"
-        "/trade\\_check טיקר — המלצת Wheel/Spread מפורטת\n"
-        "/quick\\_scan — רשימה קומפקטית: מניה | אסטרטגיה | סיכוי | הכנסה\n"
-        "/gex — מפת GEX אינטראקטיבי (הבוט ישאל איזה טיקר)\n"
-        "/regime — משטר שוק Citadel Style (GREEN/YELLOW/RED)\n\n"
-        "🔬 *מחקר:*\n"
-        "/deepdive טיקר — ניתוח עמוק + דוח במייל\n\n"
-        "🤖 *מודל ML:*\n"
-        "/train — אימון מחדש של מודל XGBoost\n"
-        "/leaderboard — Top 15 מניות לפי ציון ML (48 שעות אחרונות)\n\n"
-        "ℹ️ *מערכת:*\n"
-        "/status — סנפשוט שוק (VIX + מאקרו)\n"
-        "/options — הגדרת Iron Condor 0DTE על SPX\n"
-        "/help — ההודעה הזו\n\n"
-        "📅 *תזמון אוטומטי:* סריקה יומית ב-16:45 שעון ישראל, ראשון–חמישי",
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    msg = """🤖 *כל הפקודות שלי*
+
+━━━━━━━━━━━━━━━━━━━━━━
+🧠 *סוכנים*
+- /status — מצב כל 3 הסוכנים
+- /regime — Agent 1 ידנית (ניתוח שוק + מאקרו)
+- /strategist — Agent 2 ידנית (המלצות טריידים)
+- /riskcheck — Agent 3 ידנית (ניהול סיכונים)
+
+━━━━━━━━━━━━━━━━━━━━━━
+📊 *סורקים וניתוחים*
+- /scan — Options Scanner (IV אמיתי)
+- /scan AAPL NVDA — סריקה על מניות ספציפיות
+- /zerod — 0DTE Analysis על SPY + QQQ
+- /zerod AAPL — 0DTE על מניה ספציפית
+
+━━━━━━━━━━━━━━━━━━━━━━
+💼 *ניהול פוזיציות*
+- /positions — כל הפוזיציות הפתוחות
+- /addposition TICKER STRATEGY SHORT LONG CREDIT EXP
+- /closeposition TICKER PRICE
+
+━━━━━━━━━━━━━━━━━━━━━━
+🧠 *ניהול ידע*
+- /learn <טקסט> — הוסף ידע חדש לזיכרון
+- /reset — אפס שיחה
+
+━━━━━━━━━━━━━━━━━━━━━━
+💬 *Free Chat — פשוט תשאל:*
+- "מה ה-IV של NVDA?"
+- "מה ה-PCR היום?"
+- "תנתח לי TSLA לפני Earnings"
+- "מה לעשות ב-0DTE היום?"
+- "הסבר לי Iron Condor"
+- "מה מצב הפוזיציות שלי?"
+- "מה הריג'ים היום?"
+
+━━━━━━━━━━━━━━━━━━━━━━
+📐 */addposition דוגמה:*
+`/addposition AAPL BullPutSpread 175 170 1.65 2026-05-16 2`"""
+
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def cmd_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1742,7 +1754,7 @@ def build_app() -> Application:
 
     # ── Core ──────────────────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",        cmd_start))
-    app.add_handler(CommandHandler("help",         cmd_help))
+    app.add_handler(CommandHandler("help",         help_command))
     app.add_handler(CommandHandler("status",       status_command))
     app.add_handler(CommandHandler("market",       cmd_status))
     app.add_handler(CommandHandler("options",      cmd_options_0dte))
