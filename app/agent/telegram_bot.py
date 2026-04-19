@@ -1094,8 +1094,26 @@ def _sync_train_model():
 async def dailyscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("🔍 מריץ סריקה יומית...")
     try:
-        from run_daily_scan import run_scan
-        run_scan()
+        from app.services.finviz_service import FinvizService
+        from app.services.ml_service import predict_confidence
+
+        bullish = FinvizService.get_bullish_tickers(n=10)
+        bearish = FinvizService.get_bearish_tickers(n=5)
+
+        lines = ["📊 *סריקה יומית — תוצאות:*\n"]
+        lines.append("📈 *שוריות:*")
+        for t in bullish[:5]:
+            conf = predict_confidence(t)
+            conf_str = f"`{conf:.0f}%`" if conf else "N/A"
+            lines.append(f"• {t} | ML: {conf_str}")
+
+        lines.append("\n📉 *דוביות:*")
+        for t in bearish[:3]:
+            conf = predict_confidence(t)
+            conf_str = f"`{conf:.0f}%`" if conf else "N/A"
+            lines.append(f"• {t} | ML: {conf_str}")
+
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
     except Exception as e:
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
@@ -1116,18 +1134,37 @@ async def smartmoney_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("📰 מריץ סריקת חדשות...")
+    await update.message.reply_text("📰 מחפש חדשות שוק...")
     try:
-        from run_news_scan import run_hybrid_scan
-        run_hybrid_scan(source="both")
+        from app.services.perplexity_service import PerplexityService
+        from datetime import date
+        svc = PerplexityService()
+        if svc.is_available():
+            today = date.today().strftime("%B %d, %Y")
+            answer = svc.ask(
+                f"Top 5 US stock market news today {today}. "
+                f"Include: earnings, Fed news, sector moves. "
+                f"Format as bullet points in Hebrew."
+            )
+            await update.message.reply_text(
+                f"📰 *חדשות שוק — {today}*\n\n{answer}",
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text(
+                "⚠️ Perplexity לא מוגדר. הוסף PERPLEXITY_API_KEY ל-Render."
+            )
     except Exception as e:
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 async def intelligence_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("🧠 מריץ Market Intelligence...")
     try:
-        from run_market_intelligence import run_market_intelligence
-        run_market_intelligence()
+        from app.agent.market_regime_agent import MarketRegimeAgent
+        agent = MarketRegimeAgent()
+        report = agent.run()
+        msg = report.summary_hebrew[:4000] if hasattr(report, "summary_hebrew") else "✅ Intelligence הושלם"
+        await update.message.reply_text(msg, parse_mode="Markdown")
     except Exception as e:
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
