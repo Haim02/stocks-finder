@@ -1414,24 +1414,32 @@ def _run_gex_sync(ticker: str, max_dte: int) -> str:
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show all available commands."""
-    if not _is_authorized(update):
-        return
     msg = """🤖 *כל הפקודות שלי*
 
 ━━━━━━━━━━━━━━━━━━━━━━
-🧠 *סוכנים*
+🧠 *סוכנים חדשים*
 - /status — מצב כל 3 הסוכנים
-- /regime — Agent 1 ידנית (ניתוח שוק + מאקרו)
+- /regime — Agent 1 ידנית (שוק + מאקרו)
 - /strategist — Agent 2 ידנית (המלצות טריידים)
 - /riskcheck — Agent 3 ידנית (ניהול סיכונים)
 
 ━━━━━━━━━━━━━━━━━━━━━━
-📊 *סורקים וניתוחים*
+📊 *סריקות (שולחות דוח במייל)*
+- /dailyscan — סריקה יומית מלאה + ניתוח טכני
+- /optionsscan — דוח אופציות יומי
+- /smartmoney — זיהוי צבירה מוסדית (Wyckoff)
+- /news — סריקת חדשות שוק
+- /intelligence — ניתוח מאקרו + רוטציית סקטורים
+- /otc — סורק מניות OTC
+
+━━━━━━━━━━━━━━━━━━━━━━
+🎯 *אסטרטגיות אופציות*
 - /scan — Options Scanner (IV אמיתי)
-- /scan AAPL NVDA — סריקה על מניות ספציפיות
+- /scan AAPL NVDA — סריקה ספציפית
 - /zerod — 0DTE Analysis על SPY + QQQ
 - /zerod AAPL — 0DTE על מניה ספציפית
+- /strategies — S&P 500 + Nasdaq 100
+- /strategies AAPL TSLA — מניות ספציפיות
 
 ━━━━━━━━━━━━━━━━━━━━━━
 💼 *ניהול פוזיציות*
@@ -1440,8 +1448,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 - /closeposition TICKER PRICE
 
 ━━━━━━━━━━━━━━━━━━━━━━
+🤖 *מודל ML*
+- /train — אימון מחדש של XGBoost
+- /leaderboard — Top 15 מניות לפי ML
+
+━━━━━━━━━━━━━━━━━━━━━━
 🧠 *ניהול ידע*
-- /learn <טקסט> — הוסף ידע חדש לזיכרון
+- /learn <טקסט> — הוסף ידע לזיכרון
 - /reset — אפס שיחה
 
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -1451,12 +1464,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 - "תנתח לי TSLA לפני Earnings"
 - "מה לעשות ב-0DTE היום?"
 - "הסבר לי Iron Condor"
-- "מה מצב הפוזיציות שלי?"
-- "מה הריג'ים היום?"
 
 ━━━━━━━━━━━━━━━━━━━━━━
-📐 */addposition דוגמה:*
-`/addposition AAPL BullPutSpread 175 170 1.65 2026-05-16 2`"""
+📅 *תזמון אוטומטי:*
+🕙 10:00 Agent 1 | 🕥 10:30 Agent 2
+🔁 כל שעה Agent 3 | 🕔 16:45 סיכום יומי"""
 
     await update.message.reply_text(msg, parse_mode="Markdown")
 
