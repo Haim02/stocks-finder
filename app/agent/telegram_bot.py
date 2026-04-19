@@ -1089,6 +1089,66 @@ def _sync_train_model():
     train_xgb_model()
 
 
+# ── Restored simple command handlers (called by name-convention handlers) ─────
+
+async def dailyscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("🔍 מריץ סריקה יומית...")
+    try:
+        from run_daily_scan import run_scan
+        run_scan()
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+async def optionsscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("📊 מריץ סריקת אופציות...")
+    try:
+        from run_options_scan import run_options_scan
+        run_options_scan()
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+async def smartmoney_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("🦅 מריץ Smart Money...")
+    try:
+        from run_smart_money import run_smart_money_tracker
+        run_smart_money_tracker()
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("📰 מריץ סריקת חדשות...")
+    try:
+        from run_news_scan import run_hybrid_scan
+        run_hybrid_scan(source="both")
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+async def intelligence_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("🧠 מריץ Market Intelligence...")
+    try:
+        from run_market_intelligence import run_market_intelligence
+        run_market_intelligence()
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+async def otc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("🔬 מריץ סריקת OTC...")
+    try:
+        from run_otc_scan import run_otc_pipeline
+        run_otc_pipeline()
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+async def train_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("🤖 מאמן מחדש את מודל XGBoost...")
+    try:
+        from train_model import train_xgb_model
+        train_xgb_model()
+        await update.message.reply_text("✅ אימון הושלם!")
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
 async def cmd_analyze_ticker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     /analyze TICKER — quick options-focused analysis: IV rank, best strategy, TA summary.
@@ -1771,13 +1831,13 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("trade_check",  cmd_trade_check))
 
     # ── Scan runners ─────────────────────────────────────────────────────────
-    app.add_handler(CommandHandler("dailyscan",    cmd_daily_scan))
-    app.add_handler(CommandHandler("optionsscan",  cmd_options_scan))
-    app.add_handler(CommandHandler("smartmoney",   cmd_smart_money))
-    app.add_handler(CommandHandler("news",         cmd_news_scan))
-    app.add_handler(CommandHandler("intelligence", cmd_market_intelligence))
-    app.add_handler(CommandHandler("otc",          cmd_otc_scan))
-    app.add_handler(CommandHandler("train",        cmd_train_model))
+    app.add_handler(CommandHandler("dailyscan",    dailyscan_command))
+    app.add_handler(CommandHandler("optionsscan",  optionsscan_command))
+    app.add_handler(CommandHandler("smartmoney",   smartmoney_command))
+    app.add_handler(CommandHandler("news",         news_command))
+    app.add_handler(CommandHandler("intelligence", intelligence_command))
+    app.add_handler(CommandHandler("otc",          otc_command))
+    app.add_handler(CommandHandler("train",        train_command))
     app.add_handler(CommandHandler("leaderboard",  cmd_leaderboard))
     app.add_handler(CommandHandler("regime",        cmd_regime))
     app.add_handler(CommandHandler("strategist",   cmd_strategist))
