@@ -134,6 +134,85 @@ def _get_atm_iv_from_chain(ticker: str, target_dte: int = 35) -> tuple[float, fl
         return 0.0, 0.0, 1.0, False
 
 
+def _get_real_iv(ticker: str, price: float) -> float:
+    """
+    Get real IV from options chain with multiple fallback methods.
+    Never returns 0 — always gives a usable estimate.
+    Critical for meme/short-squeeze stocks where the standard ATM filter misses options.
+    """
+    stock = yf.Ticker(ticker)
+
+    # Method 1: Options chain — wider 10% strike band, try first 4 expirations
+    try:
+        expirations = stock.options
+        if expirations:
+            for exp in expirations[:4]:
+                try:
+                    chain = stock.option_chain(exp)
+                    iv_values = []
+                    for df in (chain.calls, chain.puts):
+                        if df.empty:
+                            continue
+                        atm = df[
+                            (df["strike"] >= price * 0.90) &
+                            (df["strike"] <= price * 1.10) &
+                            (df["impliedVolatility"] > 0.01)
+                        ]
+                        iv_values.extend(atm["impliedVolatility"].tolist())
+                    if iv_values:
+                        iv = float(np.median(iv_values)) * 100
+                        if iv > 1.0:
+                            logger.info("_get_real_iv %s (options chain): %.1f%%", ticker, iv)
+                            return iv
+                except Exception:
+                    continue
+    except Exception as e:
+        logger.debug("Options chain failed for %s: %s", ticker, e)
+
+    # Method 2: HV-based estimate with move-adjusted multiplier
+    # IV is typically 10-30% above realised vol; for stocks in motion it's much higher
+    try:
+        hist = stock.history(period="3mo")
+        if not hist.empty and len(hist) > 10:
+            returns = hist["Close"].pct_change().dropna()
+            rv_10 = float(returns.rolling(10).std().iloc[-1]) * (252 ** 0.5) * 100
+            rv_30 = (
+                float(returns.rolling(30).std().iloc[-1]) * (252 ** 0.5) * 100
+                if len(returns) >= 30 else rv_10
+            )
+            base_iv = max(rv_10, rv_30)
+            recent_5d = abs(float(hist["Close"].pct_change(5).iloc[-1])) * 100
+            if recent_5d > 20:
+                multiplier = 3.0
+            elif recent_5d > 10:
+                multiplier = 2.0
+            elif recent_5d > 5:
+                multiplier = 1.5
+            else:
+                multiplier = 1.2
+            estimated = round(base_iv * multiplier, 1)
+            logger.info(
+                "_get_real_iv %s (HV estimate): %.1f%% (rv_10=%.1f rv_30=%.1f 5d=%.1f%% x%.1f)",
+                ticker, estimated, rv_10, rv_30, recent_5d, multiplier,
+            )
+            return estimated
+    except Exception as e:
+        logger.debug("HV estimate failed for %s: %s", ticker, e)
+
+    # Method 3: Beta-based rough estimate
+    try:
+        beta = stock.info.get("beta") or 0
+        if beta and beta > 0:
+            estimated = round(min(beta * 30, 200), 1)
+            logger.info("_get_real_iv %s (beta fallback): %.1f%%", ticker, estimated)
+            return estimated
+    except Exception:
+        pass
+
+    logger.warning("_get_real_iv %s: all methods failed — returning 30%% default", ticker)
+    return 30.0
+
+
 def _calc_iv_rank_from_history(ticker: str, current_iv: float) -> tuple[float, float, float, float]:
     """
     Calculate IV Rank and IV Percentile using 1-year of historical
@@ -231,6 +310,14 @@ def get_realtime_iv_data(ticker: str) -> RealTimeIVData:
     current_iv_pct = current_iv_raw * 100  # convert to percentage
 
     data_source = "yfinance" if current_iv_raw > 0 else "proxy"
+
+    # Sanity check — standard ATM filter misses meme/short-squeeze stocks
+    if current_iv_pct < 5.0:
+        logger.warning(
+            "%s: IV suspiciously low (%.1f%%) — retrying with robust method", ticker, current_iv_pct
+        )
+        current_iv_pct = _get_real_iv(ticker, current_price)
+        data_source = "estimated"
 
     # Enhancement: try OpenBB for more accurate IV Rank
     try:

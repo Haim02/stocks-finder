@@ -184,7 +184,7 @@ def scan_high_iv(
     Results sorted by opportunity_score descending.
     """
     import yfinance as yf
-    import numpy as np
+    from app.services.realtime_market_data import _get_real_iv
 
     if tickers is None:
         tickers = DEFAULT_SCAN_LIST
@@ -200,35 +200,9 @@ def scan_high_iv(
 
             closes = hist["Close"]
             price = float(closes.iloc[-1])
-
             returns = closes.pct_change().dropna()
-            hv_30 = float(returns.rolling(30).std().iloc[-1]) * math.sqrt(252) * 100
-            iv_current = hv_30
 
-            try:
-                expirations = stock.options
-                if expirations:
-                    today = date.today()
-                    target_exp = None
-                    for exp in expirations:
-                        dte = (date.fromisoformat(exp) - today).days
-                        if 20 <= dte <= 50:
-                            target_exp = exp
-                            break
-                    if target_exp is None:
-                        target_exp = expirations[0]
-
-                    chain = stock.option_chain(target_exp)
-                    atm_calls = chain.calls[abs(chain.calls["strike"] - price) < price * 0.03]
-                    atm_puts = chain.puts[abs(chain.puts["strike"] - price) < price * 0.03]
-                    iv_values = (
-                        atm_calls["impliedVolatility"].dropna().tolist()
-                        + atm_puts["impliedVolatility"].dropna().tolist()
-                    )
-                    if iv_values:
-                        iv_current = float(np.median(iv_values)) * 100
-            except Exception:
-                pass
+            iv_current = _get_real_iv(ticker, price)
 
             if iv_current < min_iv:
                 continue
