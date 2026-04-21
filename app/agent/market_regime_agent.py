@@ -246,104 +246,184 @@ def _calculate_verdict(
 
 # ── Hebrew summary builder ────────────────────────────────────────────────────
 
-def _build_hebrew_summary(
-    report: MarketRegimeReport,
-    research: Optional[PerplexityResearch] = None,
-    perplexity_risk_desc: str = "",
-) -> str:
-    verdict_emoji = {"GREEN": "🟢", "YELLOW": "🟡", "RED": "🔴"}.get(report.verdict, "⚪")
-    verdict_text = {
-        "GREEN": "ירוק — מתאים לסחור היום",
-        "YELLOW": "צהוב — זהירות, סחר בסיזינג מופחת",
-        "RED": "אדום — לא מומלץ לפתוח פוזיציות חדשות היום",
-    }.get(report.verdict, "לא ידוע")
+def _build_hebrew_summary(report: MarketRegimeReport) -> str:
+    verdict = report.verdict
+    vix = report.vix
+    spy_trend = report.spy_trend
+    iv_rank = report.iv_rank
+    sentiment = report.sentiment_avg
+    macro = getattr(report, 'macro_snapshot', None) or _last_macro_snapshot
+    pcr = getattr(report, 'pcr_signal', None)
+    perplexity_notes = getattr(report, 'perplexity_notes', [])
 
-    trend_heb = {
-        "bullish": "עולה 📈",
-        "bearish": "יורד 📉",
-        "neutral": "ניטרלי ➡️",
-    }.get(report.spy_trend, "לא ידוע")
+    # Verdict
+    verdict_map = {
+        "GREEN": ("🟢", "ירוק — מומלץ לפתוח פוזיציות היום"),
+        "YELLOW": ("🟡", "צהוב — סחר בזהירות, הקטן סיזינג"),
+        "RED": ("🔴", "אדום — לא מומלץ לפתוח פוזיציות חדשות היום"),
+    }
+    v_emoji, v_text = verdict_map.get(verdict, ("⚪", verdict))
 
-    lines = [
-        f"🧠 *Agent 1 — Market Regime Report*",
-        f"🕙 {datetime.now().strftime('%d/%m/%Y %H:%M')} שעון ישראל",
-        f"",
-        f"{verdict_emoji} *ורדיקט: {verdict_text}*",
-        f"",
-        f"📊 *נתוני שוק:*",
-        f"• VIX: `{report.vix}` {'⚠️ גבוה' if report.vix > 22 else '✅ תקין'}",
-        f"• SPY Trend: {trend_heb}",
-        f"• IV Rank (SPY): `{report.iv_rank}%`",
-        f"• סנטימנט שוק: `{report.sentiment_avg}/10`",
-        f"",
-    ]
-
-    # Macro section — use rich FRED data if available
-    if _last_macro_snapshot:
-        from app.services.fred_service import format_for_telegram
-        lines.append("")
-        lines.append(format_for_telegram(_last_macro_snapshot))
+    # VIX interpretation
+    if vix < 15:
+        vix_note = "נמוך מאוד — שוק רדום, פרמיה זולה"
+        vix_impact = "💡 *השפעה:* IV נמוך → אופציות זולות → עדיף לקנות LEAPs, לא למכור פרמיה"
+    elif vix < 20:
+        vix_note = "✅ תקין — שוק יציב"
+        vix_impact = "💡 *השפעה:* סביבה נוחה לכל האסטרטגיות"
+    elif vix < 25:
+        vix_note = "⚠️ מוגבר — זהירות"
+        vix_impact = "💡 *השפעה:* פרמיה מתחילה להיות אטרקטיבית לעסקאות מכירה, הקטן גודל"
+    elif vix < 30:
+        vix_note = "🔴 גבוה — פחד בשוק"
+        vix_impact = "💡 *השפעה:* VIX גבוה = אופציות יקרות = זמן טוב למכור פרמיה, אבל הקטן פוזיציות"
     else:
-        lines.extend([
-            f"",
-            f"🌍 *מאקרו:*",
-            f"• Fed Rate: `{report.fed_rate}%`",
-            f"• CPI YoY: `{report.cpi_yoy}%`",
-            f"• Regime: `{report.macro_regime}`",
-        ])
+        vix_note = "🚨 קיצוני — פאניקה"
+        vix_impact = "💡 *השפעה:* אל תפתח עסקאות חדשות. VIX מעל 30 = spreads רחבים, fills גרועים"
 
-    # Perplexity section
-    if research and research.has_data:
-        lines.append(f"")
-        lines.append(f"🔍 *Perplexity Research:*")
-        if research.macro_events:
-            short = research.macro_events[:200].replace("\n", " ")
-            lines.append(f"• אירועי מאקרו: {short}...")
-        if research.fed_commentary:
-            short = research.fed_commentary[:200].replace("\n", " ")
-            lines.append(f"• הפד: {short}...")
-        if research.sp500_risks:
-            short = research.sp500_risks[:150].replace("\n", " ")
-            lines.append(f"• סיכוני S&P 500: {short}...")
-        if perplexity_risk_desc:
-            lines.append(f"• ⚠️ {perplexity_risk_desc}")
-    elif research and not research.has_data:
-        lines.append(f"")
-        lines.append(f"🔍 *Perplexity:* לא מוגדר — הוסף PERPLEXITY\\_API\\_KEY להפעלה")
+    # IV Rank interpretation
+    if iv_rank >= 50:
+        iv_note = "🔥 גבוה — אופציות יקרות"
+        iv_impact = "💡 *השפעה:* זמן מצוין למכור פרמיה — Iron Condor, Bull Put Spread"
+    elif iv_rank >= 35:
+        iv_note = "✅ בינוני-גבוה — סביבה טובה"
+        iv_impact = "💡 *השפעה:* Credit Spreads מוגדרי סיכון — מומלץ"
+    elif iv_rank >= 20:
+        iv_note = "⚠️ בינוני — פרמיה מוגבלת"
+        iv_impact = "💡 *השפעה:* Bull Put Spread בזהירות, צמצם יעדי קרדיט"
+    else:
+        iv_note = "❄️ נמוך — אופציות זולות"
+        iv_impact = "💡 *השפעה:* לא זמן למכור פרמיה. שקול LEAPs או Debit Spreads"
 
-    # Strategy hint based on IV Rank
-    if report.verdict != "RED":
-        lines.append(f"")
-        if report.iv_rank >= 35:
-            lines.append(f"💡 *המלצת אסטרטגיה:* IV Rank גבוה → מכירת פרמיה (Iron Condor, Bull Put Spread)")
-        elif report.iv_rank < 25:
-            lines.append(f"💡 *המלצת אסטרטגיה:* IV Rank נמוך → קניית Debit Spreads / Straddle")
+    # SPY trend
+    spy_note = "📈 עולה" if "bull" in spy_trend.lower() or "עולה" in spy_trend else "📉 יורד" if "bear" in spy_trend.lower() or "יורד" in spy_trend else "➡️ ניטרלי"
+
+    # PCR interpretation
+    pcr_section = ""
+    if not pcr:
+        try:
+            from app.services.pcr_signal import get_pcr_signal
+            pcr = get_pcr_signal("SPY")
+        except Exception:
+            pass
+    if pcr:
+        pcr_val = pcr.pcr if hasattr(pcr, 'pcr') else 0
+        put_vol = pcr.put_volume if hasattr(pcr, 'put_volume') else 0
+        call_vol = pcr.call_volume if hasattr(pcr, 'call_volume') else 0
+        if pcr_val > 1.3:
+            pcr_note = f"🟢 {pcr_val:.2f} — שוק פחדני מאוד"
+            pcr_impact = "כשכולם קונים Puts מגנים, השוק לרוב **עולה** — סיגנל קונטרריאני חזק"
+        elif pcr_val > 1.0:
+            pcr_note = f"🟢 {pcr_val:.2f} — שוק פחדני"
+            pcr_impact = "יותר מגנים מהמרות — נוטה לעלייה"
+        elif pcr_val < 0.7:
+            pcr_note = f"🔴 {pcr_val:.2f} — שוק חמדני"
+            pcr_impact = "כולם קונים Calls — אופטימיות יתר = סיכון לתיקון"
         else:
-            lines.append(f"💡 *המלצת אסטרטגיה:* IV Rank בינוני → Credit Spreads מוגדרי סיכון")
+            pcr_note = f"⚪ {pcr_val:.2f} — ניטרלי"
+            pcr_impact = "אין כיוון ברור מהאופציות"
 
-    lines.append(f"")
-    if report.verdict == "RED":
-        lines.append(f"⛔ Agent 2 לא יופעל היום")
-    elif report.verdict == "YELLOW":
-        lines.append(f"⚠️ Agent 2 יופעל עם סיזינג 50%")
-    else:
-        lines.append(f"✅ Agent 2 מופעל — סיזינג מלא")
+        pcr_section = (
+            f"\n\n📐 *PCR — סנטימנט אופציות:*\n"
+            f"• ערך: {pcr_note}\n"
+            f"• Puts: `{put_vol:,}` | Calls: `{call_vol:,}`\n"
+            f"• 💡 *משמעות:* {pcr_impact}"
+        )
 
-    # PCR signal — options market sentiment
-    try:
-        from app.services.pcr_signal import get_pcr_signal, format_pcr_hebrew
-        pcr = get_pcr_signal("SPY")
-        if pcr:
-            if pcr.regime_impact == "GREEN_boost" and report.verdict == "YELLOW":
-                logger.info("PCR is bullish — noted alongside YELLOW verdict")
-            elif pcr.regime_impact == "RED_boost" and report.verdict == "GREEN":
-                logger.info("PCR is bearish — noted alongside GREEN verdict")
-            lines.append("")
-            lines.append(format_pcr_hebrew(pcr))
-    except Exception as e:
-        logger.debug("PCR signal failed: %s", e)
+    # Macro section
+    macro_section = ""
+    if macro:
+        fed = macro.fed_funds_rate
+        curve = macro.yield_curve
+        cpi = macro.cpi_yoy
+        sp500 = macro.sp500_level
+        sp500_chg = macro.sp500_change_1m
+        recession_prob = macro.recession_probability
+        regime = macro.regime
 
-    return "\n".join(lines)
+        curve_note = "✅ תקין — אין סכנת מיתון" if curve > 0 else "⚠️ הפוך — אות מיתון"
+        curve_impact = (
+            "עקום חיובי = כלכלה בריאה = טוב לשוק"
+            if curve > 0
+            else "עקום הפוך = היסטורית מנבא מיתון = הזהר!"
+        )
+
+        cpi_note = ""
+        if cpi > 0:
+            cpi_note = f"• אינפלציה (CPI): `{cpi}%`"
+            if cpi > 4:
+                cpi_note += " 🔴 גבוה — הפד ימשיך להדק"
+            elif cpi > 2.5:
+                cpi_note += " ⚠️ מעל היעד — הפד זהיר"
+            else:
+                cpi_note += " ✅ ליד יעד 2%"
+
+        regime_emoji = {
+            "expansion": "🟢 התרחבות",
+            "recovery": "🔵 התאוששות",
+            "slowdown": "🟡 האטה",
+            "stagflation": "🟠 סטגפלציה",
+            "recession": "🔴 מיתון",
+        }.get(regime, regime)
+
+        macro_section = (
+            f"\n\n🌍 *נתוני מאקרו (FRED):*\n"
+            f"• ריבית Fed: `{fed:.2f}%`\n"
+            f"• עקום תשואות (10Y-2Y): `{curve:+.2f}%` — {curve_note}\n"
+            f"  💡 {curve_impact}\n"
+        )
+        if cpi_note:
+            macro_section += f"{cpi_note}\n"
+        macro_section += (
+            f"• S&P 500: `{sp500:,.0f}` ({sp500_chg:+.1f}% החודש)\n"
+            f"• הסתברות מיתון: `{recession_prob:.0f}%`\n"
+            f"• משטר כלכלי: {regime_emoji}"
+        )
+
+    # Perplexity notes
+    perp_section = ""
+    if perplexity_notes:
+        perp_section = "\n\n🔍 *חדשות ואירועים היום:*\n"
+        for note in perplexity_notes[:3]:
+            clean = str(note).strip()[:120]
+            perp_section += f"• {clean}\n"
+
+    # Reason for RED / YELLOW
+    reason_section = ""
+    if verdict == "RED":
+        reason_section = (
+            "\n\n⛔ *למה אדום?*\n"
+            "הסוכן זיהה סיכון בחדשות או בנתוני מאקרו. "
+            "Agent 2 לא יריץ המלצות עסקאות היום. "
+            "מחר הסוכן יבדוק שוב."
+        )
+    elif verdict == "YELLOW":
+        reason_section = (
+            "\n\n⚠️ *מה לעשות בצהוב?*\n"
+            "הקטן סיזינג ל-50%. רק Tier A+ setups. "
+            "Agent 2 ירוץ אבל ימליץ על עסקאות שמרניות בלבד."
+        )
+
+    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    return (
+        f"🧠 *Agent 1 — ניתוח שוק יומי*\n"
+        f"🕙 {timestamp} שעון ישראל\n"
+        f"{'━' * 30}\n\n"
+        f"{v_emoji} *ורדיקט: {v_text}*"
+        f"{reason_section}\n\n"
+        f"{'━' * 30}\n"
+        f"📊 *נתוני שוק:*\n"
+        f"• VIX: `{vix:.2f}` — {vix_note}\n"
+        f"  {vix_impact}\n"
+        f"• SPY: {spy_note}\n"
+        f"• IV Rank (SPY): `{iv_rank:.1f}%` — {iv_note}\n"
+        f"  {iv_impact}\n"
+        f"• סנטימנט: `{sentiment:.1f}/10`"
+        f"{macro_section}"
+        f"{pcr_section}"
+        f"{perp_section}"
+    )
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
@@ -409,7 +489,7 @@ class MarketRegimeAgent:
                 "perplexity_risk": perplexity_risk_desc,
             },
         )
-        report.summary_hebrew = _build_hebrew_summary(report, research, perplexity_risk_desc)
+        report.summary_hebrew = _build_hebrew_summary(report)
 
         # 5. Save to MongoDB
         self._save_to_mongo(report)

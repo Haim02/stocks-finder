@@ -113,6 +113,8 @@ def _fetch_from_fred(fred) -> MacroSnapshot:
             cpi_yoy = 0.0
     except Exception:
         cpi_yoy = 0.0
+    if cpi_yoy == 0.0:
+        cpi_yoy = 2.8  # fallback
 
     # PCE YoY
     try:
@@ -124,6 +126,8 @@ def _fetch_from_fred(fred) -> MacroSnapshot:
             pce_yoy = 0.0
     except Exception:
         pce_yoy = 0.0
+    if pce_yoy == 0.0:
+        pce_yoy = 2.5  # fallback
 
     unemployment = latest("UNRATE", start=start_1m)
     vix          = latest("VIXCLS", start=start_1m)
