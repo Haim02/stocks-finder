@@ -140,6 +140,16 @@ def _get_real_iv(ticker: str, price: float) -> float:
     Never returns 0 — always gives a usable estimate.
     Critical for meme/short-squeeze stocks where the standard ATM filter misses options.
     """
+    # Method 0: IBKR — most accurate, only available when TWS/Gateway is running
+    try:
+        from app.services.ibkr_service import get_real_iv_from_ibkr
+        ibkr_iv = get_real_iv_from_ibkr(ticker)
+        if ibkr_iv and ibkr_iv > 1.0:
+            logger.info("_get_real_iv %s (IBKR): %.1f%%", ticker, ibkr_iv)
+            return ibkr_iv
+    except Exception:
+        pass
+
     stock = yf.Ticker(ticker)
 
     # Method 1: Options chain — wider 10% strike band, try first 4 expirations

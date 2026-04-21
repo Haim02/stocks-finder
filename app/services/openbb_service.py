@@ -95,6 +95,38 @@ def get_earnings_calendar_openbb(ticker: str) -> Optional[list[dict]]:
         return None
 
 
+def get_bullish_tickers_openbb(n: int = 10) -> list[str]:
+    """Get top gainers from OpenBB — used as Finviz backup."""
+    try:
+        from openbb import obb
+        gainers = obb.equity.market.gainers(source="yf")
+        if gainers and hasattr(gainers, "results"):
+            tickers = [r.symbol for r in gainers.results[:n] if hasattr(r, "symbol")]
+            if tickers:
+                logger.info("OpenBB gainers: %s", tickers)
+                return tickers
+    except Exception as e:
+        logger.debug("OpenBB gainers failed: %s", e)
+    return []
+
+
+def get_finviz_with_openbb_fallback(n: int = 10) -> tuple[list[str], list[str]]:
+    """Try Finviz first, fall back to OpenBB gainers if Finviz fails."""
+    try:
+        from app.services.finviz_service import FinvizService
+        bullish = FinvizService.get_bullish_tickers(n=n)
+        bearish = FinvizService.get_bearish_tickers(n=n // 2)
+        if bullish:
+            logger.info("Using Finviz: %d bullish, %d bearish", len(bullish), len(bearish))
+            return bullish, bearish
+    except Exception as e:
+        logger.warning("Finviz failed, trying OpenBB: %s", e)
+
+    bullish = get_bullish_tickers_openbb(n)
+    logger.info("Using OpenBB fallback: %d bullish", len(bullish))
+    return bullish, []
+
+
 def get_macro_indicators_openbb() -> Optional[dict]:
     """
     Get macro indicators from OpenBB as additional data source.

@@ -1094,11 +1094,10 @@ def _sync_train_model():
 async def dailyscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("🔍 מריץ סריקה יומית...")
     try:
-        from app.services.finviz_service import FinvizService
+        from app.services.openbb_service import get_finviz_with_openbb_fallback
         from app.services.ml_service import predict_confidence
 
-        bullish = FinvizService.get_bullish_tickers(n=10)
-        bearish = FinvizService.get_bearish_tickers(n=5)
+        bullish, bearish = get_finviz_with_openbb_fallback(n=10)
 
         lines = ["📊 *סריקה יומית — תוצאות:*\n"]
         lines.append("📈 *שוריות:*")
@@ -1482,6 +1481,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 - /zerod AAPL — 0DTE על מניה ספציפית
 - /evaluate AAPL — האם שווה להיכנס לעסקה?
 - /backtest AAPL — Win Rate היסטורי
+- /chainscreen AAPL — chain מלא → Bull Put + BWB
+- /spxsignal — SPX 0DTE Signal (קנה Straddle / מכור Condor)
 
 ━━━━━━━━━━━━━━━━━━━━━━
 💼 *ניהול פוזיציות*
@@ -1837,6 +1838,70 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(f"⚠️ שגיאה בשליפת סטטוס: {e}")
 
 
+async def chainscreen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/chainscreen TICKER — Screen full options chain for best Bull Put Spread + BWB."""
+    if not _is_authorized(update):
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "📝 שימוש: `/chainscreen TICKER`\nדוגמה: `/chainscreen AAPL`",
+            parse_mode="Markdown",
+        )
+        return
+    ticker = context.args[0].upper()
+    await update.message.reply_text(f"🔍 סורק options chain של {ticker}... (עד 30 שניות)")
+    try:
+        from app.services.options_chain_screener import (
+            find_best_credit_spread, find_broken_wing_butterfly, format_credit_spread_hebrew,
+        )
+        spread, bwb = await asyncio.gather(
+            asyncio.to_thread(lambda: find_best_credit_spread(ticker)),
+            asyncio.to_thread(lambda: find_broken_wing_butterfly(ticker)),
+        )
+        if not spread and not bwb:
+            await update.message.reply_text(
+                f"⚠️ לא נמצאה הזדמנות ב-{ticker}.\n"
+                "נסה מניה אחרת עם IV Rank גבוה יותר, או בדוק שיש אופציות נזילות."
+            )
+            return
+        lines = [f"🎯 *Chain Screen — {ticker}*\n"]
+        if spread:
+            lines.append(format_credit_spread_hebrew(spread))
+        if bwb:
+            lines.append("\n" + format_credit_spread_hebrew(bwb))
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    except Exception as e:
+        logger.exception("chainscreen_command failed for %s", ticker)
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
+async def spxsignal_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/spxsignal — SPX 0DTE straddle signal: buy or sell based on actual vs expected move."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text("📊 מחשב SPX 0DTE Signal...")
+    try:
+        from app.services.ibkr_service import get_spx_0dte_signal
+        sig = await asyncio.to_thread(get_spx_0dte_signal)
+        action = {
+            "buy_straddle": "📈 קנה Straddle",
+            "sell_condor":  "📉 מכור Iron Condor",
+            "neutral":      "➡️ ניטרלי",
+        }.get(sig["signal"], "⚪")
+        msg = (
+            f"📊 *SPX 0DTE Signal*\n{'━' * 26}\n\n"
+            f"🎯 *{action}*\n\n"
+            f"📐 תנועה ממוצעת: `${sig.get('mean_actual', 0)}`\n"
+            f"📐 תנועה צפויה: `${sig.get('expected', 0)}`\n"
+            f"📊 יחס: `{sig.get('ratio', 1):.2f}x`\n\n"
+            f"💡 {sig.get('reason', '')}"
+        )
+        await update.message.reply_text(msg, parse_mode="Markdown")
+    except Exception as e:
+        logger.exception("spxsignal_command failed")
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
 async def ivscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/ivscan [TICKERS] [--min-rank N] — Scan for high IV stocks and explain why."""
     if not _is_authorized(update):
@@ -2012,6 +2077,10 @@ def build_app() -> Application:
 
     # ── High IV Scanner ───────────────────────────────────────────────────────
     app.add_handler(CommandHandler("ivscan",       ivscan_command))
+
+    # ── Options Chain Screener + SPX Signal ───────────────────────────────────
+    app.add_handler(CommandHandler("chainscreen",  chainscreen_command))
+    app.add_handler(CommandHandler("spxsignal",    spxsignal_command))
 
     # ── Backtest + Trade evaluation ────────────────────────────────────────────
     app.add_handler(CommandHandler("backtest",     backtest_command))
