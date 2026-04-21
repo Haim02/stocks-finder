@@ -1454,58 +1454,61 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     msg = """🤖 *כל הפקודות שלי*
 
 ━━━━━━━━━━━━━━━━━━━━━━
-🧠 *סוכנים חדשים*
+🧠 *סוכנים*
 - /status — מצב כל 3 הסוכנים
 - /regime — Agent 1 ידנית (שוק + מאקרו)
 - /strategist — Agent 2 ידנית (המלצות טריידים)
 - /riskcheck — Agent 3 ידנית (ניהול סיכונים)
 
 ━━━━━━━━━━━━━━━━━━━━━━
-📊 *סריקות (שולחות דוח במייל)*
-- /dailyscan — סריקה יומית מלאה + ניתוח טכני
+📊 *סריקות*
+- /dailyscan — סריקה יומית + ML confidence
 - /optionsscan — דוח אופציות יומי
-- /smartmoney — זיהוי צבירה מוסדית (Wyckoff)
-- /news — סריקת חדשות שוק
-- /intelligence — ניתוח מאקרו + רוטציית סקטורים
+- /smartmoney — זיהוי צבירה מוסדית
+- /news — חדשות שוק בזמן אמת
+- /intelligence — מאקרו + רוטציית סקטורים
 - /otc — סורק מניות OTC
-
-━━━━━━━━━━━━━━━━━━━━━━
-🎯 *אסטרטגיות אופציות*
 - /scan — Options Scanner (IV אמיתי)
 - /scan AAPL NVDA — סריקה ספציפית
+
+━━━━━━━━━━━━━━━━━━━━━━
+🎯 *אסטרטגיות ואופציות*
+- /strategies — S&P 500 + Nasdaq
+- /strategies AAPL TSLA — מניות ספציפיות
 - /zerod — 0DTE Analysis על SPY + QQQ
 - /zerod AAPL — 0DTE על מניה ספציפית
-- /strategies — S&P 500 + Nasdaq 100
-- /strategies AAPL TSLA — מניות ספציפיות
+- /evaluate AAPL — האם שווה להיכנס לעסקה?
+- /backtest AAPL — Win Rate היסטורי
 
 ━━━━━━━━━━━━━━━━━━━━━━
 💼 *ניהול פוזיציות*
-- /positions — כל הפוזיציות הפתוחות
+- /positions — פוזיציות פתוחות
 - /addposition TICKER STRATEGY SHORT LONG CREDIT EXP
 - /closeposition TICKER PRICE
 
 ━━━━━━━━━━━━━━━━━━━━━━
 🤖 *מודל ML*
-- /train — אימון מחדש של XGBoost
+- /train — אימון מחדש XGBoost
 - /leaderboard — Top 15 מניות לפי ML
 
 ━━━━━━━━━━━━━━━━━━━━━━
 🧠 *ניהול ידע*
 - /learn <טקסט> — הוסף ידע לזיכרון
 - /reset — אפס שיחה
+- /help — הרשימה הזו
 
 ━━━━━━━━━━━━━━━━━━━━━━
 💬 *Free Chat — פשוט תשאל:*
 - "מה ה-IV של NVDA?"
 - "מה ה-PCR היום?"
-- "תנתח לי TSLA לפני Earnings"
+- "תנתח TSLA לפני Earnings"
 - "מה לעשות ב-0DTE היום?"
-- "הסבר לי Iron Condor"
+- "הסבר Iron Condor"
 
 ━━━━━━━━━━━━━━━━━━━━━━
-📅 *תזמון אוטומטי:*
+📅 *אוטומטי:*
 🕙 10:00 Agent 1 | 🕥 10:30 Agent 2
-🔁 כל שעה Agent 3 | 🕔 16:45 סיכום יומי"""
+🔁 כל שעה Agent 3 | 🕔 16:45 סיכום"""
 
     await update.message.reply_text(msg, parse_mode="Markdown")
 
@@ -1831,6 +1834,75 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(f"⚠️ שגיאה בשליפת סטטוס: {e}")
 
 
+async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/backtest [TICKER] — Backtest Bull Put Spread on a ticker (1 year lookback)."""
+    if not _is_authorized(update):
+        return
+    ticker = context.args[0].upper() if context.args else "SPY"
+    await update.message.reply_text(f"🔬 מריץ Backtest על {ticker}... (עד 30 שניות)")
+    try:
+        from app.services.backtest_engine import backtest_bull_put_spread, format_backtest_hebrew
+        result = await asyncio.to_thread(lambda: backtest_bull_put_spread(ticker))
+        if result:
+            msg = format_backtest_hebrew(result)
+            await update.message.reply_text(msg, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(f"⚠️ לא הצלחתי להריץ backtest על {ticker} — ייתכן שאין מספיק נתונים היסטוריים")
+    except Exception as e:
+        logger.exception("backtest_command failed for %s", ticker)
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
+async def evaluate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/evaluate TICKER — Evaluate if a Bull Put Spread setup is worth taking right now."""
+    if not _is_authorized(update):
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "📝 שימוש: `/evaluate TICKER`\nדוגמה: `/evaluate AAPL`",
+            parse_mode="Markdown",
+        )
+        return
+
+    ticker = context.args[0].upper()
+    await update.message.reply_text(f"🔍 מעריך עסקה על {ticker}...")
+
+    try:
+        from app.services.realtime_market_data import get_realtime_iv_data
+        from app.services.technical_indicators import get_technical_snapshot
+        from app.services.pcr_signal import get_pcr_signal
+        from app.services.iv_calculator import check_earnings_soon, get_vix_level
+        from app.services.trade_rules import evaluate_bull_put_entry, format_signal_hebrew
+
+        iv_data, tech, pcr, vix, has_earnings = await asyncio.gather(
+            asyncio.to_thread(lambda: get_realtime_iv_data(ticker)),
+            asyncio.to_thread(lambda: get_technical_snapshot(ticker)),
+            asyncio.to_thread(lambda: get_pcr_signal("SPY")),
+            asyncio.to_thread(get_vix_level),
+            asyncio.to_thread(lambda: check_earnings_soon(ticker, days=14)),
+        )
+
+        signal = evaluate_bull_put_entry(
+            ticker=ticker,
+            price=iv_data.current_price,
+            iv_rank=iv_data.iv_rank,
+            rsi=tech.rsi_14 if tech else 50.0,
+            macd_histogram=tech.macd_histogram if tech else 0.0,
+            adx=tech.adx if tech else 20.0,
+            trend=tech.trend_signal if tech else "neutral",
+            dte=38,
+            vix=vix,
+            pcr=pcr.pcr if pcr else 1.0,
+        )
+
+        msg = format_signal_hebrew(signal, ticker)
+        await update.message.reply_text(msg, parse_mode="Markdown")
+
+    except Exception as e:
+        logger.exception("evaluate_command failed for %s", ticker)
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Bot setup + run
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1897,6 +1969,10 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("addposition",  addposition_command))
     app.add_handler(CommandHandler("closeposition", closeposition_command))
     app.add_handler(CommandHandler("riskcheck",    riskcheck_command))
+
+    # ── Backtest + Trade evaluation ────────────────────────────────────────────
+    app.add_handler(CommandHandler("backtest",     backtest_command))
+    app.add_handler(CommandHandler("evaluate",     evaluate_command))
 
     # ── Free chat — MUST be registered LAST so it doesn't shadow /commands ────
     app.add_handler(
