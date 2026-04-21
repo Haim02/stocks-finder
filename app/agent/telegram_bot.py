@@ -1470,6 +1470,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 - /otc — סורק מניות OTC
 - /scan — Options Scanner (IV אמיתי)
 - /scan AAPL NVDA — סריקה ספציפית
+- /ivscan — מניות עם IV גבוה + הסבר למה (X/Perplexity)
+- /ivscan AAPL TSLA — סריקה ספציפית
+- /ivscan --min-rank 70 — רק IV Rank > 70%
 
 ━━━━━━━━━━━━━━━━━━━━━━
 🎯 *אסטרטגיות ואופציות*
@@ -1834,6 +1837,43 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(f"⚠️ שגיאה בשליפת סטטוס: {e}")
 
 
+async def ivscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/ivscan [TICKERS] [--min-rank N] — Scan for high IV stocks and explain why."""
+    if not _is_authorized(update):
+        return
+
+    args = context.args or []
+    custom_tickers = [a.upper() for a in args if not a.startswith("--")] or None
+    min_rank = 50.0
+    for i, a in enumerate(args):
+        if a == "--min-rank" and i + 1 < len(args):
+            try:
+                min_rank = float(args[i + 1])
+            except ValueError:
+                pass
+
+    await update.message.reply_text("🔍 סורק IV גבוה... (עד 45 שניות)")
+
+    try:
+        from app.services.iv_scanner import scan_high_iv, format_iv_scan_telegram, fetch_x_mentions
+
+        results = await asyncio.to_thread(
+            lambda: scan_high_iv(tickers=custom_tickers, min_iv_rank=min_rank, max_results=8)
+        )
+
+        perplexity_notes = {}
+        if results:
+            top_tickers = [r.ticker for r in results[:5]]
+            perplexity_notes = await asyncio.to_thread(fetch_x_mentions, top_tickers)
+
+        msg = format_iv_scan_telegram(results, perplexity_notes)
+        await update.message.reply_text(msg, parse_mode="Markdown")
+
+    except Exception as e:
+        logger.exception("ivscan_command failed")
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
 async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/backtest [TICKER] — Backtest Bull Put Spread on a ticker (1 year lookback)."""
     if not _is_authorized(update):
@@ -1969,6 +2009,9 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("addposition",  addposition_command))
     app.add_handler(CommandHandler("closeposition", closeposition_command))
     app.add_handler(CommandHandler("riskcheck",    riskcheck_command))
+
+    # ── High IV Scanner ───────────────────────────────────────────────────────
+    app.add_handler(CommandHandler("ivscan",       ivscan_command))
 
     # ── Backtest + Trade evaluation ────────────────────────────────────────────
     app.add_handler(CommandHandler("backtest",     backtest_command))
