@@ -1469,6 +1469,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 - /otc — סורק מניות OTC
 - /scan — Options Scanner (IV אמיתי)
 - /scan AAPL NVDA — סריקה ספציפית
+- /internet <שאלה> — חיפוש ישיר באינטרנט בזמן אמת (Perplexity)
 - /ivscan — מניות עם IV גבוה + הסבר למה (X/Perplexity)
 - /ivscan AAPL TSLA — סריקה ספציפית
 - /ivscan --min-rank 70 — רק IV Rank > 70%
@@ -1963,6 +1964,49 @@ async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 
+async def internet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Direct internet search via Perplexity."""
+    if not _is_authorized(update):
+        return
+
+    query = " ".join(context.args) if context.args else ""
+    if not query:
+        await update.message.reply_text(
+            "📝 שימוש: `/internet <שאלה>`\n\n"
+            "דוגמאות:\n"
+            "• `/internet why is NVDA up today`\n"
+            "• `/internet what sectors are hot this week`\n"
+            "• `/internet AAPL latest earnings results`\n"
+            "• `/internet next big AI trend`",
+            parse_mode="Markdown"
+        )
+        return
+
+    await update.message.reply_text(f"🌐 מחפש באינטרנט: _{query}_...", parse_mode="Markdown")
+
+    try:
+        from app.services.perplexity_service import PerplexityService
+        svc = PerplexityService()
+        if not svc.is_available():
+            await update.message.reply_text(
+                "⚠️ Perplexity לא מוגדר.\n"
+                "הוסף PERPLEXITY_API_KEY ב-Render Environment Variables."
+            )
+            return
+
+        result = await asyncio.to_thread(svc.search, query, 1000)
+        if result:
+            await update.message.reply_text(
+                f"🌐 *תוצאה מהאינטרנט:*\n\n{result}",
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text("⚠️ לא נמצאה תשובה.")
+    except Exception as e:
+        logger.exception("internet_command failed")
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
 async def csp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Scan for Cash Secured Put opportunities."""
     if not _is_authorized(update):
@@ -2207,6 +2251,9 @@ def build_app() -> Application:
 
     # ── Cash Secured Put Scanner ──────────────────────────────────────────────
     app.add_handler(CommandHandler("csp",          csp_command))
+
+    # ── Internet search (Perplexity) ──────────────────────────────────────────
+    app.add_handler(CommandHandler("internet",     internet_command))
 
     # ── Free chat — MUST be registered LAST so it doesn't shadow /commands ────
     app.add_handler(

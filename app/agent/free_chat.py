@@ -21,6 +21,7 @@ Commands still supported:
 /reset         → clear conversation history
 """
 
+import asyncio
 import logging
 import os
 import re
@@ -674,66 +675,112 @@ def _detect_intent(text: str) -> list[str]:
 
 # ── Context Builder ───────────────────────────────────────────────────────────
 
-async def _build_context(text: str) -> str:
-    """Build all relevant context based on detected intents."""
+def _build_context(text: str) -> str:
+    """Build context — Perplexity is the internet, everything else is backup."""
+    from app.services.perplexity_service import PerplexityService
+    svc = PerplexityService()
     intents = _detect_intent(text)
     context_parts = []
+    text_lower = text.lower()
 
-    # Auto-fetch real IV data for ALL tickers mentioned
+    # ── 1. ALWAYS: Today's macro picture (when market-related) ───────────────
+    if any(w in text_lower for w in [
+        "שוק", "היום", "מאקרו", "fed", "vix", "מה קורה",
+        "market", "economy", "ריבית", "אינפלציה",
+    ]):
+        macro = svc.get_macro_today()
+        if macro:
+            context_parts.append(f"[אינטרנט — אירועי היום]\n{macro}")
+
+    # ── 2. Stock-specific internet search ─────────────────────────────────────
     tickers = _extract_tickers(text)
-    for ticker in tickers:
-        stock_ctx = _fetch_stock_data(ticker)
-        if stock_ctx:
-            context_parts.append(stock_ctx)
+    for ticker in tickers[:3]:
+        # Always get latest news for any ticker mentioned
+        news = svc.get_stock_news(ticker)
+        if news:
+            context_parts.append(f"[אינטרנט — חדשות {ticker}]\n{news}")
 
-    # Always add regime if market-related
-    regime = _fetch_latest_regime()
-    if regime:
-        context_parts.append(regime)
+        # Why is it moving?
+        if any(w in text_lower for w in ["למה", "why", "עלה", "ירד", "זז", "נסק"]):
+            try:
+                import yfinance as yf
+                hist = yf.Ticker(ticker).history(period="5d")
+                if not hist.empty and len(hist) >= 2:
+                    move = float((hist["Close"].iloc[-1] / hist["Close"].iloc[-2] - 1) * 100)
+                    if abs(move) > 1:
+                        why = svc.why_is_stock_moving(ticker, move)
+                        if why:
+                            context_parts.append(f"[למה {ticker} זז]\n{why}")
+            except Exception:
+                pass
 
+        # Analyst rating changes
+        if any(w in text_lower for w in ["אנליסט", "analyst", "upgrade", "downgrade", "target"]):
+            analyst = svc.get_analyst_changes(ticker)
+            if analyst:
+                context_parts.append(f"[שינויי אנליסטים — {ticker}]\n{analyst}")
+
+        # IV data (lightweight — after internet)
+        try:
+            from app.services.realtime_market_data import get_realtime_iv_data
+            iv = get_realtime_iv_data(ticker)
+            if iv.current_price > 0:
+                context_parts.append(
+                    f"[IV Data — {ticker}]\n"
+                    f"מחיר: ${iv.current_price} | IV Rank: {iv.iv_rank:.0f}% | "
+                    f"Expected Move: ±${iv.expected_move_30d}"
+                )
+        except Exception:
+            pass
+
+    # ── 3. Sector rotation ────────────────────────────────────────────────────
+    if any(w in text_lower for w in ["סקטור", "sector", "rotation", "רוטציה", "מגמה"]):
+        rotation = svc.get_sector_rotation()
+        if rotation:
+            context_parts.append(f"[רוטציה סקטוריאלית — אינטרנט]\n{rotation}")
+
+    # ── 4. Next big trend ─────────────────────────────────────────────────────
+    if any(w in text_lower for w in ["טרנד", "trend", "מהפכה", "הבא", "next", "ai", "עתיד"]):
+        trend = svc.get_next_big_trend()
+        if trend:
+            context_parts.append(f"[מגמות עתידיות — אינטרנט]\n{trend}")
+
+    # ── 5. CSP candidates from internet ──────────────────────────────────────
+    if any(w in text_lower for w in ["csp", "put", "פוט", "מניות זולות"]):
+        csp = svc.search_for_csp_candidates(20)
+        if csp:
+            context_parts.append(f"[מניות CSP — אינטרנט]\n{csp}")
+
+    # ── 6. PCR Signal ─────────────────────────────────────────────────────────
+    if "sentiment" in intents or "regime" in intents:
+        pcr = _fetch_pcr_signal()
+        if pcr:
+            context_parts.append(f"[PCR Signal]\n{pcr}")
+
+    # ── 7. Open positions (always when asked) ─────────────────────────────────
     if "positions" in intents:
         pos = _fetch_open_positions()
         if pos:
             context_parts.append(pos)
 
+    # ── 8. Latest trade ideas (Agent 2) ──────────────────────────────────────
     if "ideas" in intents:
         ideas = _fetch_latest_trade_ideas()
         if ideas:
             context_parts.append(ideas)
 
-    if "sentiment" in intents:
-        sent = _fetch_market_sentiment()
-        if sent:
-            context_parts.append(sent)
+    # ── 9. Market regime (Agent 1 last report) ───────────────────────────────
+    regime = _fetch_latest_regime()
+    if regime:
+        context_parts.append(regime)
 
-    if "finviz" in intents or "scan" in intents:
+    # ── 10. Finviz scan candidates ────────────────────────────────────────────
+    if "scan" in intents:
         fvz = _fetch_finviz_candidates()
         if fvz:
             context_parts.append(fvz)
-        # Also fetch market sentiment when scanning
-        sent = _fetch_market_sentiment()
-        if sent:
-            context_parts.append(sent)
 
-    if "sentiment" in intents or "regime" in intents:
-        pcr = _fetch_pcr_signal()
-        if pcr:
-            context_parts.append(pcr)
-
-    if "regime" in intents or "realtime" in intents:
-        macro = _fetch_macro_calendar()
-        if macro:
-            context_parts.append(macro)
-
-    if "realtime" in intents:
-        pplx = _fetch_perplexity(text)
-        if pplx:
-            context_parts.append(pplx)
-        else:
-            oai = _fetch_openai_fact(text)
-            if oai:
-                context_parts.append(oai)
-
+    # ── 11. 0DTE ─────────────────────────────────────────────────────────────
     if "zero_dte" in intents:
         try:
             from app.services.zero_dte_scanner import analyze_zero_dte, format_zero_dte_report
@@ -743,6 +790,12 @@ async def _build_context(text: str) -> str:
                     context_parts.append(format_zero_dte_report(setup))
         except Exception:
             pass
+
+    # ── 12. General realtime fallback (no ticker, generic question) ───────────
+    if "realtime" in intents and not tickers:
+        pplx = _fetch_perplexity(text)
+        if pplx:
+            context_parts.append(pplx)
 
     return "\n\n---\n\n".join(context_parts) if context_parts else ""
 
@@ -816,7 +869,7 @@ class FreeChatHandler:
         """Main chat handler — feels like Claude/ChatGPT."""
         await update.message.chat.send_action(ChatAction.TYPING)
 
-        context_data = await _build_context(text)
+        context_data = await asyncio.to_thread(_build_context, text)
 
         user_content = text
         if context_data:
