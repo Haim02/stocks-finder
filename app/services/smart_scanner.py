@@ -382,90 +382,182 @@ def deep_scan_ticker(ticker: str, fetch_perplexity: bool = True) -> Optional[Sma
 
 
 def format_smart_scan_hebrew(r: SmartScanResult) -> str:
-    """Format the full smart scan result — the way a real analyst would explain it."""
-    trend_emoji = {
-        "STRONG_UP": "🚀 מגמה שורית חזקה",
-        "UP": "📈 מגמה שורית",
-        "NEUTRAL": "➡️ ניטרלי",
-        "DOWN": "📉 מגמה דובית",
-    }.get(r.trend_strength, "➡️")
 
-    inst_emoji = {
-        "ACCUMULATING": "🏦 מוסדיים צוברים",
-        "DISTRIBUTING": "⚠️ מוסדיים מוכרים",
-        "NEUTRAL": "⚪ ניטרלי",
-    }.get(r.institutional_signal, "⚪")
+    # Trend emojis
+    trend_text = {
+        "STRONG_UP": "🚀 עלייה חזקה — המניה במגמה שורית עם מומנטום גבוה",
+        "UP": "📈 עלייה — המניה נסחרת מעל הממוצעים הנעים",
+        "NEUTRAL": "➡️ ניטרלי — אין כיוון ברור כרגע",
+        "DOWN": "📉 ירידה — המניה בלחץ מוכרים",
+    }.get(r.trend_strength, "➡️ ניטרלי")
 
-    score_bar = "█" * int(r.opportunity_score / 10) + "░" * (10 - int(r.opportunity_score / 10))
-    chg_str = lambda v: ("+" if v >= 0 else "") + f"{v:.1f}%"
+    inst_text = {
+        "ACCUMULATING": "🏦 מוסדיים צוברים — Volume גבוה עם עלייה = כסף גדול נכנס",
+        "DISTRIBUTING": "⚠️ מוסדיים מוכרים — Volume גבוה עם ירידה = כסף גדול יוצא",
+        "NEUTRAL": "⚪ פעילות מוסדית רגילה",
+    }.get(r.institutional_signal, "⚪ ניטרלי")
 
+    # RSI explanation
+    if r.rsi_14 > 75:
+        rsi_text = f"`{r.rsi_14:.0f}` 🔥 קנייה מופרזת — המניה חמה מאוד, זהירות מתיקון"
+    elif r.rsi_14 > 60:
+        rsi_text = f"`{r.rsi_14:.0f}` ✅ חיובי — מומנטום טוב, לא overbought"
+    elif r.rsi_14 > 40:
+        rsi_text = f"`{r.rsi_14:.0f}` ➡️ ניטרלי"
+    else:
+        rsi_text = f"`{r.rsi_14:.0f}` 🧊 מכירה מופרזת — המניה חלשה, שים לב"
+
+    # Volume explanation
+    if r.volume_ratio > 2.5:
+        vol_text = f"`{r.volume_ratio:.1f}x` 🚨 Volume חריג ביותר — אירוע משמעותי קורה"
+    elif r.volume_ratio > 1.8:
+        vol_text = f"`{r.volume_ratio:.1f}x` ⚡ Volume גבוה — תנועה אמינה, לא ספקולציה"
+    elif r.volume_ratio > 1.2:
+        vol_text = f"`{r.volume_ratio:.1f}x` 📊 Volume מעל ממוצע — סיגנל בינוני"
+    else:
+        vol_text = f"`{r.volume_ratio:.1f}x` Volume רגיל"
+
+    # MA explanation
+    if r.price_above_ma50 and r.price_above_ma200:
+        ma_text = "✅ מעל MA50 וMA200 — מגמה שורית מאושרת בשני הטווחים"
+    elif r.price_above_ma50:
+        ma_text = "🟡 מעל MA50 אך מתחת MA200 — שורי לטווח קצר, ניטרלי לטווח ארוך"
+    else:
+        ma_text = "🔴 מתחת לממוצעים הנעים — מגמה דובית"
+
+    # 52W position
+    if r.at_52w_high:
+        range_text = "🏔️ שיא שנתי חדש! — עוצמה יוצאת דופן, פריצה לשטח חדש"
+    elif r.pct_from_52w_low > 80:
+        range_text = f"📈 {r.pct_from_52w_low:.0f}% מעל השפל השנתי — קרוב לשיא"
+    elif r.pct_from_52w_low > 50:
+        range_text = f"➡️ {r.pct_from_52w_low:.0f}% מעל השפל השנתי — אמצע הטווח"
+    else:
+        range_text = f"⚠️ {r.pct_from_52w_low:.0f}% מעל השפל השנתי — קרוב לשפל"
+
+    # Fundamental lines with explanations
     fund_lines = []
-    if r.revenue_growth_yoy:
-        grow_emoji = "📈" if r.revenue_growth_yoy > 10 else ("📉" if r.revenue_growth_yoy < 0 else "➡️")
-        fund_lines.append(f"  {grow_emoji} Revenue Growth: `{r.revenue_growth_yoy:+.0f}%` YoY")
-    if r.profit_margin:
-        margin_emoji = "💚" if r.profit_margin > 20 else ("🟡" if r.profit_margin > 0 else "❌")
-        fund_lines.append(f"  {margin_emoji} Margin: `{r.profit_margin:.0f}%`")
-    if r.pe_ratio:
-        fund_lines.append(f"  📊 P/E: `{r.pe_ratio:.0f}x`")
-    if r.upside_to_target:
-        up_emoji = "🎯" if r.upside_to_target > 15 else "➡️"
-        fund_lines.append(
-            f"  {up_emoji} יעד אנליסטים: `${r.analyst_target:.0f}` ({r.upside_to_target:+.0f}% upside)"
-        )
+    if r.revenue_growth_yoy is not None and r.revenue_growth_yoy != 0:
+        if r.revenue_growth_yoy > 25:
+            fund_lines.append(f"  📈 *צמיחת הכנסות:* `{r.revenue_growth_yoy:+.0f}%` — צמיחה מרשימה מאוד, החברה מתרחבת בקצב גבוה")
+        elif r.revenue_growth_yoy > 10:
+            fund_lines.append(f"  📈 *צמיחת הכנסות:* `{r.revenue_growth_yoy:+.0f}%` — צמיחה בריאה, עסק גדל")
+        elif r.revenue_growth_yoy > 0:
+            fund_lines.append(f"  ➡️ *צמיחת הכנסות:* `{r.revenue_growth_yoy:+.0f}%` — צמיחה מתונה")
+        else:
+            fund_lines.append(f"  📉 *צמיחת הכנסות:* `{r.revenue_growth_yoy:+.0f}%` — ירידה בהכנסות, בעיה פונדמנטלית")
 
+    if r.profit_margin is not None and r.profit_margin != 0:
+        if r.profit_margin > 25:
+            fund_lines.append(f"  💚 *שולי רווח:* `{r.profit_margin:.0f}%` — רווחיות גבוהה מאוד, עסק יעיל")
+        elif r.profit_margin > 10:
+            fund_lines.append(f"  🟡 *שולי רווח:* `{r.profit_margin:.0f}%` — רווחיות סבירה")
+        elif r.profit_margin > 0:
+            fund_lines.append(f"  🟠 *שולי רווח:* `{r.profit_margin:.0f}%` — רווחיות נמוכה, עוקב")
+        else:
+            fund_lines.append(f"  🔴 *שולי רווח:* `{r.profit_margin:.0f}%` — הפסדי כרגע")
+
+    if r.pe_ratio and r.pe_ratio > 0:
+        if r.pe_ratio > 50:
+            fund_lines.append(f"  📊 *מכפיל רווח (P/E):* `{r.pe_ratio:.0f}x` — יקר, השוק מתמחר צמיחה עתידית גבוהה")
+        elif r.pe_ratio > 25:
+            fund_lines.append(f"  📊 *מכפיל רווח (P/E):* `{r.pe_ratio:.0f}x` — ממוצע לחברות צמיחה")
+        else:
+            fund_lines.append(f"  📊 *מכפיל רווח (P/E):* `{r.pe_ratio:.0f}x` — זול יחסית לסקטור")
+
+    if r.upside_to_target and r.analyst_target:
+        if r.upside_to_target > 20:
+            fund_lines.append(f"  🎯 *יעד אנליסטים:* `${r.analyst_target:.0f}` — פוטנציאל עלייה של `{r.upside_to_target:.0f}%` לפי וול סטריט")
+        elif r.upside_to_target > 0:
+            fund_lines.append(f"  🎯 *יעד אנליסטים:* `${r.analyst_target:.0f}` — עוד `{r.upside_to_target:.0f}%` לפי הקונסנזוס")
+        else:
+            fund_lines.append(f"  ⚠️ *יעד אנליסטים:* `${r.analyst_target:.0f}` — מחיר נוכחי מעל יעד האנליסטים")
+
+    analyst_map = {
+        "STRONGBUY": "📢 קנייה חזקה — קונסנזוס חיובי מאוד",
+        "STRONG_BUY": "📢 קנייה חזקה",
+        "BUY": "👍 קנייה — רוב האנליסטים ממליצים",
+        "HOLD": "🤝 החזק — אין המלצה ברורה",
+        "SELL": "👎 מכירה",
+        "UNDERPERFORM": "📉 ביצוע חסר",
+    }
+    analyst_str = analyst_map.get(r.analyst_rating, r.analyst_rating)
+
+    # Earnings warning
     earn_str = ""
     if r.has_earnings_catalyst and r.earnings_days is not None:
-        earn_str = (
-            f"\n🚨 *Earnings בעוד {r.earnings_days} ימים!*"
-            if r.earnings_days <= 7
-            else f"\n📅 Earnings בעוד {r.earnings_days} ימים"
-        )
+        if r.earnings_days <= 3:
+            earn_str = f"\n🚨 *Earnings בעוד {r.earnings_days} ימים בלבד!*\nזהירות קיצונית — IV יתנפח לפני הדוח וייצנח אחרי"
+        elif r.earnings_days <= 7:
+            earn_str = f"\n⚠️ *Earnings בעוד {r.earnings_days} ימים* — שקול להמתין לאחרי הדוח"
+        elif r.earnings_days <= 14:
+            earn_str = f"\n📅 *Earnings בעוד {r.earnings_days} ימים* — אפשר להיכנס, אך עם מודעות"
+        else:
+            earn_str = f"\n📅 Earnings בעוד {r.earnings_days} ימים — לא בדחיפות"
 
+    # Themes with explanations
     theme_map = {
-        "AI_INFRASTRUCTURE": "🤖 AI Infra",
-        "AI_APPLICATIONS": "💡 AI Apps",
-        "DEFENSE_SECURITY": "🛡️ Defense",
-        "CLEAN_ENERGY": "🌱 Clean Energy",
-        "BIOTECH_PHARMA": "💊 Biotech",
-        "FINTECH": "💳 FinTech",
-        "SPACE_TECH": "🚀 Space",
-        "CONSUMER_MOMENTUM": "🛒 Consumer",
+        "AI_INFRASTRUCTURE": "🤖 תשתית AI — ענן, מעבדים, דאטה סנטרים",
+        "AI_APPLICATIONS": "💡 יישומי AI — תוכנה שמשלבת AI במוצרים",
+        "DEFENSE_SECURITY": "🛡️ ביטחון — ביקוש גבוה בסביבה גיאופוליטית",
+        "CLEAN_ENERGY": "🌱 אנרגיה נקייה — מגמה ארוכת טווח",
+        "BIOTECH_PHARMA": "💊 ביוטק/פארמה — תרופות ומחקר",
+        "FINTECH": "💳 פינטק — תשלומים ופיננסים דיגיטליים",
+        "SPACE_TECH": "🚀 חלל — מגזר צומח",
+        "CONSUMER_MOMENTUM": "🛒 צרכנות — מסחר ובידור",
     }
-    themes_str = " | ".join(theme_map.get(t, t) for t in r.trend_themes) if r.trend_themes else ""
-    insight_str = f"\n💬 *למה זה זז:*\n{r.perplexity_insight}" if r.perplexity_insight else ""
+    themes_str = "\n".join(f"  • {theme_map.get(t, t)}" for t in r.trend_themes) if r.trend_themes else ""
+
+    # Score explanation
+    if r.opportunity_score >= 80:
+        score_verdict = "🟢 הזדמנות מצוינת"
+    elif r.opportunity_score >= 65:
+        score_verdict = "🟡 הזדמנות טובה"
+    elif r.opportunity_score >= 50:
+        score_verdict = "🟠 הזדמנות בינונית — שקול בזהירות"
+    else:
+        score_verdict = "🔴 לא הזמן המתאים"
+
+    score_bar = "█" * int(r.opportunity_score / 10) + "░" * (10 - int(r.opportunity_score / 10))
+
+    insight_str = f"\n💬 *מה קורה עכשיו עם המניה:*\n{r.perplexity_insight}\n" if r.perplexity_insight else ""
 
     return (
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🔍 *{r.ticker} — {r.company_name}*\n"
-        f"📍 {r.sector} | ${r.price:.2f} | Cap: ${r.market_cap_b:.0f}B\n"
-        f"{'━' * 30}\n\n"
+        f"📍 ענף: {r.sector} | מחיר: `${r.price:.2f}` | שווי: `${r.market_cap_b:.0f}B`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
-        f"📊 *ביצועים:*\n"
-        f"  שבוע: `{chg_str(r.price_change_1w)}` | "
-        f"חודש: `{chg_str(r.price_change_1m)}` | "
-        f"3M: `{chg_str(r.price_change_3m)}`\n"
-        f"  {'🏔️ ב-52W High!' if r.at_52w_high else f'{r.pct_from_52w_low:.0f}% מעל 52W Low'}\n\n"
+        f"📊 *ביצועי מחיר:*\n"
+        f"  שבוע אחרון: `{r.price_change_1w:+.1f}%`\n"
+        f"  חודש אחרון: `{r.price_change_1m:+.1f}%`\n"
+        f"  3 חודשים: `{r.price_change_3m:+.1f}%`\n"
+        f"  {range_text}\n\n"
 
-        f"📈 *מומנטום:*\n"
-        f"  {trend_emoji}\n"
-        f"  RSI: `{r.rsi_14:.0f}` | Volume: `{r.volume_ratio:.1f}x` רגיל\n"
-        f"  {'✅ מעל MA50 ו-MA200' if r.price_above_ma50 and r.price_above_ma200 else '⚠️ מתחת ל-MA'}\n\n"
+        f"📈 *ניתוח מומנטום:*\n"
+        f"  {trend_text}\n"
+        f"  RSI: {rsi_text}\n"
+        f"  עוצמת מסחר: {vol_text}\n"
+        f"  {ma_text}\n\n"
 
-        + (f"📦 *פונדמנטלי:*\n" + "\n".join(fund_lines) + "\n\n" if fund_lines else "")
-        + (f"🌍 *מגמות:* {themes_str}\n" if themes_str else "")
-        + f"*מוסדיים:* {inst_emoji}\n"
-        + ("⚠️ *Volume חריג* — פעילות אופציות גבוהה\n" if r.unusual_options else "")
+        + (f"💼 *ניתוח פונדמנטלי:*\n" + "\n".join(fund_lines) + f"\n  📢 המלצת אנליסטים: {analyst_str}\n\n" if fund_lines else "")
+
+        + (f"🌍 *מגמות עולמיות שהמניה שייכת אליהן:*\n{themes_str}\n\n" if themes_str else "")
+
+        + f"🏦 *פעילות מוסדית:*\n  {inst_text}\n"
+        + (f"  🚨 *פעילות אופציות חריגה — כסף גדול מהמר על תנועה*\n" if r.unusual_options else "")
+
         + earn_str + "\n\n"
-        + (f"{insight_str}\n\n" if insight_str else "")
+        + insight_str
 
-        + f"{'━' * 30}\n"
+        + f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🎯 *אסטרטגיה מומלצת:*\n"
-        f"*{r.recommended_strategy}*\n"
-        f"💡 {r.strategy_reason}\n\n"
+        f"*{r.recommended_strategy}*\n\n"
+        f"📝 *הסבר:* {r.strategy_reason}\n\n"
 
-        f"📊 *ציון הזדמנות:* `{r.opportunity_score:.0f}/100`\n"
+        f"📊 *ציון הזדמנות כולל: {r.opportunity_score:.0f}/100 — {score_verdict}*\n"
         f"`{score_bar}`\n"
-        f"מומנטום: `{r.momentum_score:.0f}` | פונדמנטלי: `{r.fundamental_score:.0f}`"
+        f"מומנטום: `{r.momentum_score:.0f}/100` | פונדמנטלי: `{r.fundamental_score:.0f}/100`"
     )
 
 
