@@ -1474,6 +1474,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 - /ivscan --min-rank 70 — רק IV Rank > 70%
 - /deepscan — סריקת טרנדים חמים: פונדמנטלס + מומנטום + AI
 - /deepscan AMZN NVDA — ניתוח עמוק על מניות ספציפיות
+- /csp — סריקת Cash Secured Put (מניות עד $20)
+- /csp 10 — CSP רק מניות עד $10
+- /csp SOFI PLTR — CSP על מניות ספציפיות
 
 ━━━━━━━━━━━━━━━━━━━━━━
 🎯 *אסטרטגיות ואופציות*
@@ -1960,6 +1963,48 @@ async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 
+async def csp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Scan for Cash Secured Put opportunities."""
+    if not _is_authorized(update):
+        return
+
+    args = context.args or []
+
+    # Parse: /csp [max_price] [tickers...]
+    max_price = 20.0
+    custom_tickers = None
+
+    if args:
+        try:
+            max_price = float(args[0])
+            custom_tickers = [a.upper() for a in args[1:]] or None
+        except ValueError:
+            custom_tickers = [a.upper() for a in args]
+
+    await update.message.reply_text(
+        f"🔍 סורק CSP — מניות עד ${max_price:.0f}...\n"
+        f"(בודק פרמיות, נזילות, מגמה — כ-30 שניות)"
+    )
+
+    try:
+        from app.services.csp_scanner import scan_csp_opportunities, format_csp_hebrew
+        results = await asyncio.to_thread(
+            lambda: scan_csp_opportunities(
+                max_price=max_price,
+                custom_tickers=custom_tickers,
+                max_results=6,
+            )
+        )
+        msg = format_csp_hebrew(results)
+        try:
+            await update.message.reply_text(msg, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(msg)
+    except Exception as e:
+        logger.exception("csp_command failed")
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
 async def deepscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/deepscan [TICKER ...] — Deep smart scan: fundamentals + momentum + AI insight + trend themes."""
     if not _is_authorized(update):
@@ -2159,6 +2204,9 @@ def build_app() -> Application:
 
     # ── Deep Smart Scanner ────────────────────────────────────────────────────
     app.add_handler(CommandHandler("deepscan",     deepscan_command))
+
+    # ── Cash Secured Put Scanner ──────────────────────────────────────────────
+    app.add_handler(CommandHandler("csp",          csp_command))
 
     # ── Free chat — MUST be registered LAST so it doesn't shadow /commands ────
     app.add_handler(
