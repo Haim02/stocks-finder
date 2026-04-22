@@ -1472,6 +1472,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 - /ivscan — מניות עם IV גבוה + הסבר למה (X/Perplexity)
 - /ivscan AAPL TSLA — סריקה ספציפית
 - /ivscan --min-rank 70 — רק IV Rank > 70%
+- /deepscan — סריקת טרנדים חמים: פונדמנטלס + מומנטום + AI
+- /deepscan AMZN NVDA — ניתוח עמוק על מניות ספציפיות
 
 ━━━━━━━━━━━━━━━━━━━━━━
 🎯 *אסטרטגיות ואופציות*
@@ -1958,6 +1960,75 @@ async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 
+async def deepscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/deepscan [TICKER ...] — Deep smart scan: fundamentals + momentum + AI insight + trend themes."""
+    if not _is_authorized(update):
+        return
+
+    args = [a.upper() for a in context.args] if context.args else []
+    tickers = args[:3]  # max 3 tickers
+
+    if tickers:
+        await update.message.reply_text(
+            f"🔬 מריץ Deep Scan על {', '.join(tickers)}... (עד 60 שניות)",
+        )
+        try:
+            from app.services.smart_scanner import deep_scan_ticker, format_smart_scan_hebrew
+            for ticker in tickers:
+                result = await asyncio.to_thread(
+                    lambda t=ticker: deep_scan_ticker(t, fetch_perplexity=True)
+                )
+                if result:
+                    msg = format_smart_scan_hebrew(result)
+                    for chunk in _split_message_bot(msg):
+                        try:
+                            await update.message.reply_text(chunk, parse_mode="Markdown")
+                        except Exception:
+                            await update.message.reply_text(chunk)
+                else:
+                    await update.message.reply_text(f"⚠️ לא הצלחתי לסרוק את {ticker}")
+        except Exception as e:
+            logger.exception("deepscan_command failed for %s", tickers)
+            await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+    else:
+        await update.message.reply_text(
+            "🌊 מריץ Deep Scan על טרנדים חמים... (עד 90 שניות)",
+        )
+        try:
+            from app.services.smart_scanner import scan_trending_themes, format_smart_scan_hebrew
+            results = await asyncio.to_thread(lambda: scan_trending_themes(top_n=3))
+            if not results:
+                await update.message.reply_text("⚠️ לא נמצאו הזדמנויות בסריקת טרנדים כרגע.")
+                return
+            for r in results:
+                msg = format_smart_scan_hebrew(r)
+                for chunk in _split_message_bot(msg):
+                    try:
+                        await update.message.reply_text(chunk, parse_mode="Markdown")
+                    except Exception:
+                        await update.message.reply_text(chunk)
+        except Exception as e:
+            logger.exception("deepscan_command (themes) failed")
+            await update.message.reply_text(f"⚠️ שגיאה בסריקת טרנדים: {e}")
+
+
+def _split_message_bot(text: str, limit: int = 4000) -> list[str]:
+    """Split long messages for Telegram (4096 char limit)."""
+    if len(text) <= limit:
+        return [text]
+    chunks, current, current_len = [], [], 0
+    for para in text.split("\n\n"):
+        if current_len + len(para) + 2 > limit:
+            chunks.append("\n\n".join(current))
+            current, current_len = [], 0
+        current.append(para)
+        current_len += len(para) + 2
+    if current:
+        chunks.append("\n\n".join(current))
+    return chunks
+
+
 async def evaluate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/evaluate TICKER — Evaluate if a Bull Put Spread setup is worth taking right now."""
     if not _is_authorized(update):
@@ -2085,6 +2156,9 @@ def build_app() -> Application:
     # ── Backtest + Trade evaluation ────────────────────────────────────────────
     app.add_handler(CommandHandler("backtest",     backtest_command))
     app.add_handler(CommandHandler("evaluate",     evaluate_command))
+
+    # ── Deep Smart Scanner ────────────────────────────────────────────────────
+    app.add_handler(CommandHandler("deepscan",     deepscan_command))
 
     # ── Free chat — MUST be registered LAST so it doesn't shadow /commands ────
     app.add_handler(

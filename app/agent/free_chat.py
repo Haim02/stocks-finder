@@ -169,10 +169,23 @@ def _extract_tickers(text: str) -> list[str]:
 
 
 def _fetch_stock_data(ticker: str) -> str:
-    """Fetch comprehensive real-time data for a stock ticker."""
+    """
+    Full deep scan for a stock — fundamentals + momentum + AI insight.
+    Falls back to basic IV data if smart scanner is unavailable.
+    """
     results = []
 
-    # 1. Real IV data from yfinance
+    # 1. Deep smart scan (fundamentals + momentum + Perplexity AI insight)
+    try:
+        from app.services.smart_scanner import deep_scan_ticker, format_smart_scan_hebrew
+        smart = deep_scan_ticker(ticker, fetch_perplexity=True)
+        if smart:
+            results.append(format_smart_scan_hebrew(smart))
+            return "\n\n".join(results)
+    except Exception as e:
+        logger.debug("Smart scan failed for %s: %s", ticker, e)
+
+    # 2. Fallback: Real IV data from yfinance
     try:
         from app.services.realtime_market_data import get_realtime_iv_data
         iv = get_realtime_iv_data(ticker)
@@ -206,7 +219,7 @@ def _fetch_stock_data(ticker: str) -> str:
     except Exception as e:
         logger.debug("IV fetch failed for %s: %s", ticker, e)
 
-    # 2. XGBoost confidence
+    # 3. XGBoost confidence
     try:
         from app.services.ml_service import predict_confidence
         conf = predict_confidence(ticker)
@@ -215,7 +228,7 @@ def _fetch_stock_data(ticker: str) -> str:
     except Exception:
         pass
 
-    # 3. MongoDB sentiment for this ticker
+    # 4. MongoDB sentiment for this ticker
     try:
         from app.data.mongo_client import MongoDB
         db = MongoDB.get_db()
@@ -231,17 +244,17 @@ def _fetch_stock_data(ticker: str) -> str:
     except Exception:
         pass
 
-    # 4. Yahoo Finance enrichment (earnings, news, stats)
+    # 5. Yahoo Finance enrichment (earnings, news, stats)
     yahoo_data = _fetch_yahoo_enrichment(ticker)
     if yahoo_data:
         results.append(yahoo_data)
 
-    # 5. Technical analysis (RSI, trend, support/resistance)
+    # 6. Technical analysis (RSI, trend, support/resistance)
     tech = _fetch_technical_analysis(ticker)
     if tech:
         results.append(tech)
 
-    # 6. FinTA technical indicators (extended — MACD, ADX, Stochastic, BB)
+    # 7. FinTA technical indicators (extended — MACD, ADX, Stochastic, BB)
     try:
         from app.services.technical_indicators import get_technical_snapshot, format_technical_hebrew
         finta_snap = get_technical_snapshot(ticker)
