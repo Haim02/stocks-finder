@@ -1489,6 +1489,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 - /backtest AAPL — Win Rate היסטורי
 - /chainscreen AAPL — chain מלא → Bull Put + BWB
 - /spxsignal — SPX 0DTE Signal (קנה Straddle / מכור Condor)
+- /earningstraddle — סורק Straddle לפני Earnings (11 סינונים)
 
 ━━━━━━━━━━━━━━━━━━━━━━
 💼 *ניהול פוזיציות*
@@ -1964,6 +1965,36 @@ async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 
+async def earningstraddle_command(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Scan for Earnings Straddle opportunities."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text(
+        "🎯 סורק Earnings Straddle...\n"
+        "מחפש מניות עם Earnings בעוד 3 ימים שעוברות את כל הסינונים\n"
+        "(כ-30 שניות)"
+    )
+    try:
+        from app.services.earnings_straddle_scanner import (
+            scan_earnings_straddle,
+            format_earnings_straddle_hebrew,
+        )
+        results = await asyncio.to_thread(
+            lambda: scan_earnings_straddle(days_ahead=3, max_results=5)
+        )
+        msg = format_earnings_straddle_hebrew(results)
+        for chunk in _split_message_bot(msg):
+            try:
+                await update.message.reply_text(chunk, parse_mode="Markdown")
+            except Exception:
+                await update.message.reply_text(chunk)
+    except Exception as e:
+        logger.exception("earningstraddle_command failed")
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
 async def internet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Direct internet search via Perplexity."""
     if not _is_authorized(update):
@@ -2254,6 +2285,9 @@ def build_app() -> Application:
 
     # ── Internet search (Perplexity) ──────────────────────────────────────────
     app.add_handler(CommandHandler("internet",     internet_command))
+
+    # ── Earnings Straddle Scanner ─────────────────────────────────────────────
+    app.add_handler(CommandHandler("earningstraddle", earningstraddle_command))
 
     # ── Free chat — MUST be registered LAST so it doesn't shadow /commands ────
     app.add_handler(
