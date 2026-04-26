@@ -29,38 +29,36 @@ def _set_cache(key: str, data):
 
 
 def get_tv_technical(ticker: str, exchange: str = "NASDAQ") -> Optional[dict]:
-    """Get technical analysis using tradingview-screener."""
+    """Get technical analysis for a single ticker."""
     cache_key = f"tv_tech_{ticker}"
     cached = _get_cache(cache_key)
     if cached:
         return cached
 
     try:
-        from tradingview_screener import Scanner
-        scanner = Scanner.search(
-            symbols=[f"{exchange}:{ticker}"],
-            fields=[
+        from tradingview_screener import Query, col
+
+        _, scanner = (
+            Query()
+            .select(
                 "name", "close", "change", "volume",
-                "RSI", "RSI[1]",
-                "MACD.macd", "MACD.signal",
-                "Mom", "AO",
-                "BB.upper", "BB.lower",
+                "RSI", "MACD.macd", "MACD.signal",
                 "EMA20", "EMA50", "EMA200",
-                "SMA20", "SMA50",
-                "Rec.Stoch.RSI",
-                "Recommend.All",
-                "Recommend.MA",
-                "Recommend.Other",
-            ]
+                "BB.upper", "BB.lower",
+                "Recommend.All", "Recommend.MA", "Recommend.Other",
+            )
+            .where(col("name") == ticker)
+            .set_markets("america")
+            .limit(1)
+            .get_scanner_data()
         )
 
         if scanner is None or scanner.empty:
             return None
 
         row = scanner.iloc[0]
+        rec_score = float(row.get("Recommend.All", 0) or 0)
 
-        # Parse recommendation
-        rec_score = float(row.get("Recommend.All", 0))
         if rec_score >= 0.5:
             recommendation = "STRONG_BUY"
         elif rec_score >= 0.1:
@@ -75,18 +73,15 @@ def get_tv_technical(ticker: str, exchange: str = "NASDAQ") -> Optional[dict]:
         result = {
             "recommendation": recommendation,
             "rec_score": round(rec_score, 3),
-            "rsi": round(float(row.get("RSI", 50)), 1),
-            "macd": round(float(row.get("MACD.macd", 0)), 4),
-            "macd_signal": round(float(row.get("MACD.signal", 0)), 4),
-            "close": round(float(row.get("close", 0)), 2),
-            "change_pct": round(float(row.get("change", 0)), 2),
-            "ema20": round(float(row.get("EMA20", 0)), 2),
-            "ema50": round(float(row.get("EMA50", 0)), 2),
-            "ema200": round(float(row.get("EMA200", 0)), 2),
-            "bb_upper": round(float(row.get("BB.upper", 0)), 2),
-            "bb_lower": round(float(row.get("BB.lower", 0)), 2),
-            "rec_ma": round(float(row.get("Recommend.MA", 0)), 3),
-            "rec_oscillators": round(float(row.get("Recommend.Other", 0)), 3),
+            "rsi": round(float(row.get("RSI", 50) or 50), 1),
+            "macd": round(float(row.get("MACD.macd", 0) or 0), 4),
+            "close": round(float(row.get("close", 0) or 0), 2),
+            "change_pct": round(float(row.get("change", 0) or 0), 2),
+            "ema20": round(float(row.get("EMA20", 0) or 0), 2),
+            "ema50": round(float(row.get("EMA50", 0) or 0), 2),
+            "ema200": round(float(row.get("EMA200", 0) or 0), 2),
+            "bb_upper": round(float(row.get("BB.upper", 0) or 0), 2),
+            "bb_lower": round(float(row.get("BB.lower", 0) or 0), 2),
         }
 
         _set_cache(cache_key, result)
@@ -103,88 +98,69 @@ def scan_by_signal_type(
     exchange: str = "NASDAQ",
     limit: int = 10,
 ) -> list:
-    """
-    Scan stocks by signal type using tradingview-screener.
-    Signals: oversold, overbought, strong_buy, strong_sell, trending_up, breakout
-    """
+    """Scan stocks by signal type using tradingview-screener."""
     cache_key = f"tv_scan_{signal}_{exchange}"
     cached = _get_cache(cache_key)
     if cached:
         return cached
 
     try:
-        from tradingview_screener import Scanner, col
+        from tradingview_screener import Query, col
+
+        q = Query().select(
+            "name", "close", "change", "volume", "RSI", "Recommend.All"
+        ).set_markets("america")
 
         if signal == "oversold":
-            filters = (
-                (col("RSI") < 35) &
-                (col("volume") > 500000) &
-                (col("close") > 5)
-            )
+            q = q.where(col("RSI") < 35, col("volume") > 500000, col("close") > 5)
         elif signal == "overbought":
-            filters = (
-                (col("RSI") > 70) &
-                (col("volume") > 500000) &
-                (col("close") > 5)
-            )
+            q = q.where(col("RSI") > 70, col("volume") > 500000, col("close") > 5)
         elif signal == "strong_buy":
-            filters = (
-                (col("Recommend.All") > 0.5) &
-                (col("volume") > 500000) &
-                (col("close") > 10)
-            )
+            q = q.where(col("Recommend.All") > 0.5, col("volume") > 500000)
         elif signal == "strong_sell":
-            filters = (
-                (col("Recommend.All") < -0.5) &
-                (col("volume") > 500000)
-            )
+            q = q.where(col("Recommend.All") < -0.5, col("volume") > 500000)
         elif signal == "trending_up":
-            filters = (
-                (col("EMA20") > col("EMA50")) &
-                (col("close") > col("EMA20")) &
-                (col("volume") > 500000)
+            q = q.where(
+                col("EMA20") > col("EMA50"),
+                col("close") > col("EMA20"),
+                col("volume") > 500000,
             )
         elif signal == "breakout":
-            filters = (
-                (col("change") > 3) &
-                (col("volume") > 1000000) &
-                (col("RSI") > 50) &
-                (col("RSI") < 75)
+            q = q.where(
+                col("change") > 3,
+                col("volume") > 1000000,
+                col("RSI") > 50,
+                col("RSI") < 75,
             )
         else:
             return []
 
-        scanner = Scanner.search(
-            markets=["america"],
-            filters=filters,
-            fields=["name", "close", "change", "volume", "RSI", "Recommend.All"],
-            limit=limit,
-        )
+        _, scanner = q.limit(limit).get_scanner_data()
 
         if scanner is None or scanner.empty:
             return []
 
         results = []
         for _, row in scanner.iterrows():
-            rec = float(row.get("Recommend.All", 0))
+            rec = float(row.get("Recommend.All", 0) or 0)
             results.append({
                 "symbol": str(row.get("name", "")),
-                "price": round(float(row.get("close", 0)), 2),
-                "change_percent": round(float(row.get("change", 0)), 2),
-                "rsi": round(float(row.get("RSI", 50)), 1),
+                "price": round(float(row.get("close", 0) or 0), 2),
+                "change_percent": round(float(row.get("change", 0) or 0), 2),
+                "rsi": round(float(row.get("RSI", 50) or 50), 1),
                 "recommendation": (
                     "STRONG_BUY" if rec >= 0.5 else
                     "BUY" if rec >= 0.1 else
                     "SELL" if rec <= -0.1 else "NEUTRAL"
                 ),
-                "volume": int(row.get("volume", 0)),
+                "volume": int(row.get("volume", 0) or 0),
             })
 
         _set_cache(cache_key, results)
         return results
 
     except Exception as e:
-        logger.debug("TV scan by signal failed (%s): %s", signal, e)
+        logger.warning("TV scan failed (%s): %s", signal, e)
         return []
 
 
