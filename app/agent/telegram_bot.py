@@ -1490,6 +1490,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 - /chainscreen AAPL — chain מלא → Bull Put + BWB
 - /spxsignal — SPX 0DTE Signal (קנה Straddle / מכור Condor)
 - /earningstraddle — סורק Straddle לפני Earnings (11 סינונים)
+- /debate AAPL — Bull vs Bear Debate: 4 סוכנים → פסיקה + Strategy
 
 ━━━━━━━━━━━━━━━━━━━━━━
 💼 *ניהול פוזיציות*
@@ -1965,6 +1966,41 @@ async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 
+async def debate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Run Bull vs Bear debate on a ticker: /debate AAPL"""
+    if not _is_authorized(update):
+        return
+
+    ticker = context.args[0].upper() if context.args else ""
+    if not ticker:
+        await update.message.reply_text(
+            "📝 שימוש: `/debate AAPL`\n\n"
+            "מריץ דיון Bull vs Bear — 4 סוכנים מנתחים את המניה:\n"
+            "🐂 Bull Researcher → 🐻 Bear Researcher → ⚖️ Judge → 🛡️ Risk Manager\n\n"
+            "הדיון מבוסס על: IV Rank, מחיר, RSI, TA Score, חדשות Perplexity, Regime",
+            parse_mode="Markdown",
+        )
+        return
+
+    await update.message.reply_text(
+        f"⚔️ מתחיל Bull vs Bear Debate על *{ticker}*...\n"
+        f"4 סוכנים עובדים בסדרה (~25 שניות)",
+        parse_mode="Markdown",
+    )
+    try:
+        from app.services.bull_bear_debate import run_bull_bear_debate, format_debate_hebrew
+        result = await asyncio.to_thread(lambda: run_bull_bear_debate(ticker))
+        msg = format_debate_hebrew(result)
+        for chunk in _split_message_bot(msg):
+            try:
+                await update.message.reply_text(chunk, parse_mode="Markdown")
+            except Exception:
+                await update.message.reply_text(chunk)
+    except Exception as e:
+        logger.exception("debate_command failed for %s", ticker)
+        await update.message.reply_text(f"⚠️ שגיאה בדיון: {e}")
+
+
 async def earningstraddle_command(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
@@ -2288,6 +2324,9 @@ def build_app() -> Application:
 
     # ── Earnings Straddle Scanner ─────────────────────────────────────────────
     app.add_handler(CommandHandler("earningstraddle", earningstraddle_command))
+
+    # ── Bull vs Bear Debate ───────────────────────────────────────────────────
+    app.add_handler(CommandHandler("debate",          debate_command))
 
     # ── Free chat — MUST be registered LAST so it doesn't shadow /commands ────
     app.add_handler(

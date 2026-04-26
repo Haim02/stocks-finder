@@ -649,6 +649,8 @@ class OptionsStrategistAgent:
                     idea.sentiment_score = sent.sentiment_score
                     idea.sentiment_label = sent.sentiment_label
                     idea.sentiment_reason = sent.reason
+                # Enhance with Bull vs Bear debate (non-blocking)
+                idea = self._enhance_with_debate(idea)
                 trade_ideas.append(idea)
                 logger.info(
                     "ACCEPTED %s: %s | IV_R=%.1f | IV_P=%.1f | Credit=$%.2f | P(OTM)=%.1f%%",
@@ -684,6 +686,43 @@ class OptionsStrategistAgent:
             len(trade_ideas),
         )
         return report
+
+    def _enhance_with_debate(self, idea: "TradeIdea") -> "TradeIdea":
+        """
+        Run Bull vs Bear debate on a trade idea and attach the verdict as
+        commentary. Non-blocking enhancement — if debate fails, idea is returned
+        unchanged so the main pipeline is never disrupted.
+        """
+        try:
+            from app.services.bull_bear_debate import run_bull_bear_debate
+            result = run_bull_bear_debate(idea.ticker)
+            if result.error:
+                return idea
+
+            # Attach debate summary to sentiment fields (already exist on TradeIdea)
+            verdict_heb = {
+                "BULLISH": "שורי", "BEARISH": "דובי", "NEUTRAL": "נייטרל"
+            }.get(result.verdict, result.verdict)
+
+            debate_label = (
+                f"Debate: {verdict_heb} ({result.confidence:.0f}%) | "
+                f"Bull {result.bull_score:.0f} vs Bear {result.bear_risk_score:.0f}"
+            )
+            if not result.risk_compatible:
+                debate_label += " ⚠️ " + "; ".join(result.risk_flags[:1])
+
+            # Prefer debate label over OpenAI sentiment if confidence is high
+            if result.confidence >= 65:
+                idea.sentiment_label = debate_label
+                idea.sentiment_reason = result.reason
+
+            logger.info(
+                "Debate %s → %s (conf=%.0f%%) strategy=%s",
+                idea.ticker, result.verdict, result.confidence, result.strategy,
+            )
+        except Exception as e:
+            logger.warning("_enhance_with_debate failed for %s: %s", idea.ticker, e)
+        return idea
 
     def _save_to_mongo(self, report: OptionsStrategistReport) -> None:
         try:
