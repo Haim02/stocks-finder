@@ -1478,6 +1478,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 - /csp — סריקת Cash Secured Put (מניות עד $20)
 - /csp 10 — CSP רק מניות עד $10
 - /csp SOFI PLTR — CSP על מניות ספציפיות
+- /tvscan oversold — סריקת TradingView לפי סיגנל (30+ אינדיקטורים)
+- /tvscan strong\_buy — מניות עם STRONG BUY מ-TradingView
+- /backtest AAPL — Backtest 6 אסטרטגיות (Sharpe + Win Rate + vs Buy&Hold)
 
 ━━━━━━━━━━━━━━━━━━━━━━
 🎯 *אסטרטגיות ואופציות*
@@ -1948,21 +1951,120 @@ async def ivscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/backtest [TICKER] — Backtest Bull Put Spread on a ticker (1 year lookback)."""
+    """Run professional backtest with 6 strategies via TradingView."""
     if not _is_authorized(update):
         return
-    ticker = context.args[0].upper() if context.args else "SPY"
-    await update.message.reply_text(f"🔬 מריץ Backtest על {ticker}... (עד 30 שניות)")
+
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "📝 שימוש: `/backtest TICKER [strategy]`\n\n"
+            "אסטרטגיות: `rsi`, `bollinger`, `macd`, `ema_cross`, `supertrend`, `donchian`\n"
+            "ללא strategy = כל 6 האסטרטגיות\n\n"
+            "דוגמה: `/backtest AAPL` או `/backtest NVDA supertrend`",
+            parse_mode="Markdown",
+        )
+        return
+
+    ticker = args[0].upper()
+    strategy = args[1].lower() if len(args) > 1 else None
+    await update.message.reply_text(f"📊 מריץ Backtest על {ticker}... (כ-20 שניות)")
+
     try:
-        from app.services.backtest_engine import backtest_bull_put_spread, format_backtest_hebrew
-        result = await asyncio.to_thread(lambda: backtest_bull_put_spread(ticker))
-        if result:
-            msg = format_backtest_hebrew(result)
-            await update.message.reply_text(msg, parse_mode="Markdown")
+        from app.services.tradingview_service import (
+            compare_all_strategies, run_backtest,
+            format_backtest_comparison_hebrew,
+        )
+
+        if strategy:
+            result = await asyncio.to_thread(
+                lambda: run_backtest(ticker, strategy=strategy, period="2y")
+            )
+            if result:
+                ret = result.get("total_return", 0)
+                sharpe = result.get("sharpe_ratio", 0)
+                wr = result.get("win_rate", 0)
+                trades = result.get("total_trades", 0)
+                max_dd = result.get("max_drawdown", 0)
+                bh = result.get("buy_and_hold_return", 0)
+                verdict = "✅ האסטרטגיה עדיפה על Buy&Hold" if ret > bh else "🟡 Buy&Hold עדיף"
+                msg = (
+                    f"📊 *Backtest — {ticker} ({strategy.upper()})*\n"
+                    f"{'━'*28}\n\n"
+                    f"📈 תשואה: `{ret:+.1f}%` | Buy&Hold: `{bh:+.1f}%`\n"
+                    f"📊 Sharpe Ratio: `{sharpe:.2f}`\n"
+                    f"🎯 Win Rate: `{wr:.0f}%`\n"
+                    f"📉 Max Drawdown: `{max_dd:.1f}%`\n"
+                    f"🔢 עסקאות: `{trades}`\n\n"
+                    f"{verdict}"
+                )
+            else:
+                # Fallback to original engine
+                from app.services.backtest_engine import backtest_bull_put_spread, format_backtest_hebrew
+                r = await asyncio.to_thread(lambda: backtest_bull_put_spread(ticker))
+                msg = format_backtest_hebrew(r) if r else f"⚠️ לא הצלחתי להריץ backtest על {ticker}"
         else:
-            await update.message.reply_text(f"⚠️ לא הצלחתי להריץ backtest על {ticker} — ייתכן שאין מספיק נתונים היסטוריים")
+            result = await asyncio.to_thread(
+                lambda: compare_all_strategies(ticker, period="2y")
+            )
+            msg = format_backtest_comparison_hebrew(ticker, result) if result else ""
+            if not msg:
+                # Fallback to original engine
+                from app.services.backtest_engine import backtest_bull_put_spread, format_backtest_hebrew
+                r = await asyncio.to_thread(lambda: backtest_bull_put_spread(ticker))
+                msg = format_backtest_hebrew(r) if r else f"⚠️ לא הצלחתי להריץ backtest על {ticker}"
+
+        try:
+            await update.message.reply_text(msg, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(msg)
     except Exception as e:
         logger.exception("backtest_command failed for %s", ticker)
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
+async def tvscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Scan stocks by TradingView signal type: /tvscan oversold"""
+    if not _is_authorized(update):
+        return
+
+    valid_signals = ["oversold", "overbought", "trending_up", "trending_down", "breakout", "strong_buy"]
+    signal = context.args[0].lower() if context.args else "oversold"
+
+    if signal not in valid_signals:
+        await update.message.reply_text(
+            f"📝 סיגנלים זמינים: {', '.join(valid_signals)}\n"
+            f"דוגמה: `/tvscan oversold`",
+            parse_mode="Markdown",
+        )
+        return
+
+    await update.message.reply_text(f"🔍 סורק מניות עם סיגנל: *{signal}*...", parse_mode="Markdown")
+
+    try:
+        from app.services.tradingview_service import scan_by_signal_type
+        results = await asyncio.to_thread(
+            lambda: scan_by_signal_type(signal=signal, exchange="NASDAQ")
+        )
+        if not results:
+            await update.message.reply_text("⚠️ לא נמצאו תוצאות — ייתכן שהמודול לא מותקן")
+            return
+
+        lines = [f"📊 *TradingView Scan — {signal.upper()}*\n"]
+        for r in results[:8]:
+            ticker = r.get("symbol", "")
+            rec = r.get("recommendation", "")
+            price = r.get("price", 0)
+            change = r.get("change_percent", 0)
+            emoji = "📈" if change >= 0 else "📉"
+            lines.append(f"• *{ticker}* | ${price:.2f} {emoji}{change:+.1f}% | {rec}")
+
+        try:
+            await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text("\n".join(lines))
+    except Exception as e:
+        logger.exception("tvscan_command failed")
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 
@@ -2327,6 +2429,9 @@ def build_app() -> Application:
 
     # ── Bull vs Bear Debate ───────────────────────────────────────────────────
     app.add_handler(CommandHandler("debate",          debate_command))
+
+    # ── TradingView Scanner ───────────────────────────────────────────────────
+    app.add_handler(CommandHandler("tvscan",          tvscan_command))
 
     # ── Free chat — MUST be registered LAST so it doesn't shadow /commands ────
     app.add_handler(

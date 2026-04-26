@@ -454,6 +454,19 @@ class MarketRegimeAgent:
             vix, spy_trend, iv_rank, sentiment_avg, macro_regime,
         )
 
+        # 1b. Enrich with TradingView market snapshot
+        tv_snapshot_text = ""
+        try:
+            from app.services.tradingview_service import (
+                get_market_snapshot, format_market_snapshot_hebrew,
+            )
+            snap = get_market_snapshot()
+            if snap:
+                tv_snapshot_text = format_market_snapshot_hebrew(snap)
+                logger.info("TradingView snapshot added to Agent 1")
+        except Exception as e:
+            logger.debug("TV snapshot failed in Agent 1: %s", e)
+
         # 2. Run Perplexity morning research
         perplexity_svc = PerplexityService()
         research = perplexity_svc.run_morning_research()
@@ -487,6 +500,7 @@ class MarketRegimeAgent:
                 "sma20": sma20,
                 "perplexity": research.raw_responses,
                 "perplexity_risk": perplexity_risk_desc,
+                "tv_snapshot": tv_snapshot_text,
             },
         )
         report.summary_hebrew = _build_hebrew_summary(report)

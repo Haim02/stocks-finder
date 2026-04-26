@@ -632,6 +632,21 @@ class OptionsStrategistAgent:
 
             logger.info("Evaluating %s (%s, XGB=%.1f)...", ticker, direction, conf)
 
+            # TradingView 3-layer decision — filter contradicting signals
+            try:
+                from app.services.tradingview_service import get_tv_decision
+                tv_decision = get_tv_decision(ticker)
+                if tv_decision:
+                    tv_rec = tv_decision.get("recommendation", "NEUTRAL")
+                    if tv_rec in ("STRONG_SELL", "SELL") and direction == "bullish":
+                        logger.info("TV says %s for %s — skipping bullish trade", tv_rec, ticker)
+                        continue
+                    elif tv_rec in ("STRONG_BUY", "BUY") and direction == "bearish":
+                        logger.info("TV says %s for %s — skipping bearish trade", tv_rec, ticker)
+                        continue
+            except Exception as e:
+                logger.debug("TV decision filter failed for %s: %s", ticker, e)
+
             idea = _build_trade_idea(
                 ticker=ticker,
                 direction=direction,

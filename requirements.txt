@@ -25,6 +25,7 @@ numpy
 openai
 anthropic>=0.20.0
 tradingagents>=0.2.3
+tradingview-mcp-server>=0.7.0
 
 # ── Market data APIs ──────────────────────────────────────────────────────────
 finnhub-python

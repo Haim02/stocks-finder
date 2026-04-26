@@ -182,6 +182,14 @@ def _fetch_stock_data(ticker: str) -> str:
         smart = deep_scan_ticker(ticker, fetch_perplexity=True)
         if smart:
             results.append(format_smart_scan_hebrew(smart))
+            # Add TradingView intelligence (30+ indicators, patterns, sentiment, MTF)
+            try:
+                from app.services.tradingview_service import enrich_ticker_context
+                tv_context = enrich_ticker_context(ticker)
+                if tv_context:
+                    results.append(tv_context)
+            except Exception as e:
+                logger.debug("TradingView enrichment failed for %s: %s", ticker, e)
             return "\n\n".join(results)
     except Exception as e:
         logger.debug("Smart scan failed for %s: %s", ticker, e)
@@ -691,6 +699,18 @@ def _build_context(text: str) -> str:
         macro = svc.get_macro_today()
         if macro:
             context_parts.append(f"[אינטרנט — אירועי היום]\n{macro}")
+
+    # ── 1b. TradingView market snapshot ──────────────────────────────────────
+    if any(w in text_lower for w in [
+        "שוק", "spy", "vix", "market", "מאקרו", "מה קורה", "snapshot",
+    ]):
+        try:
+            from app.services.tradingview_service import get_market_context_for_agent1
+            tv_snap = get_market_context_for_agent1()
+            if tv_snap:
+                context_parts.append(tv_snap)
+        except Exception:
+            pass
 
     # ── 2. Stock-specific internet search ─────────────────────────────────────
     tickers = _extract_tickers(text)

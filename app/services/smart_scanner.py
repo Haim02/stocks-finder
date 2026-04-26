@@ -325,6 +325,19 @@ def deep_scan_ticker(ticker: str, fetch_perplexity: bool = True) -> Optional[Sma
 
     m_score, f_score, opp_score = _score_opportunity(fund, mom, has_earnings, analyst_rating, upside)
 
+    # TradingView signal validation — adds/subtracts from opportunity score
+    try:
+        from app.services.tradingview_service import get_tv_decision
+        tv = get_tv_decision(ticker)
+        if tv:
+            tv_rec = tv.get("recommendation", "NEUTRAL")
+            tv_bonus = {
+                "STRONG_BUY": 15, "BUY": 8, "NEUTRAL": 0, "SELL": -8, "STRONG_SELL": -15,
+            }.get(tv_rec, 0)
+            opp_score = min(100.0, max(0.0, opp_score + tv_bonus))
+    except Exception:
+        pass
+
     insight = ""
     if fetch_perplexity and mom.get("chg_1m", 0) != 0:
         insight = _get_perplexity_insight(ticker, fund.get("name", ticker), mom.get("chg_1m", 0))
