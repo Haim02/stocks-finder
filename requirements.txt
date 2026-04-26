@@ -25,7 +25,6 @@ anthropic>=0.20.0
 
 # ── Market data ────────────────────────────────────────────────
 tradingview-screener
-tradingview-mcp-server
 requests
 beautifulsoup4
 cloudscraper
