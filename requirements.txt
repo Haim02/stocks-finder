@@ -1,59 +1,43 @@
-# ── Web framework (FastAPI) ───────────────────────────────────────────────────
+# ── Web framework ──────────────────────────────────────────────
 fastapi
 uvicorn
 
-# ── Database ──────────────────────────────────────────────────────────────────
+# ── Database ───────────────────────────────────────────────────
 pymongo
 certifi
-sqlalchemy
 
-# ── Settings / environment ────────────────────────────────────────────────────
+# ── Settings ───────────────────────────────────────────────────
 python-dotenv
 pydantic-settings
 
-# ── Data & ML ─────────────────────────────────────────────────────────────────
+# ── Data & ML ──────────────────────────────────────────────────
 yfinance
 pandas
-pandas-ta
-ta
-scikit-learn
-joblib
-xgboost
 numpy
+scikit-learn
+xgboost
+joblib
+ta
 
-# ── AI / LLM ──────────────────────────────────────────────────────────────────
+# ── AI / LLM ───────────────────────────────────────────────────
 openai
 anthropic>=0.20.0
-tradingagents>=0.2.3
-tradingview-mcp-server>=0.7.0
 
-# ── Market data APIs ──────────────────────────────────────────────────────────
-finnhub-python
+# ── Market data ────────────────────────────────────────────────
 tradingview-screener
+tradingview-mcp-server
 requests
 beautifulsoup4
 cloudscraper
-finvizfinance
-fredapi>=0.5.1
-scipy>=1.11.0
-optionlab>=1.0.0
-finta>=1.3
-# openbb>=4.0.0  # optional: large (~500MB), skip on constrained deployments
 
-# ── Email ─────────────────────────────────────────────────────────────────────
+# ── Email ──────────────────────────────────────────────────────
 resend
 
-# ── Scraping — Selenium + Chrome (TradingView) ────────────────────────────────
-selenium>=4.15
-webdriver-manager>=4.0
-
-# ── Telegram bot ──────────────────────────────────────────────────────────────
+# ── Telegram ───────────────────────────────────────────────────
 python-telegram-bot>=21.0
 
-# ── Scheduler ─────────────────────────────────────────────────────────────────
+# ── Scheduler ──────────────────────────────────────────────────
 apscheduler>=3.10
 
-# ── Utilities ─────────────────────────────────────────────────────────────────
-tenacity
+# ── Utilities ──────────────────────────────────────────────────
 pytz
-feedparser
