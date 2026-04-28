@@ -214,6 +214,24 @@ def enrich_ticker_context(ticker: str) -> str:
     if tv:
         parts.append(format_tv_technical_hebrew(ticker, tv))
 
+    # Add GEX + A/D for index ETFs
+    if ticker.upper() in ("SPY", "QQQ", "SPX", "IWM", "/ES"):
+        try:
+            from app.services.gex_calculator import calculate_gex, format_gex_hebrew
+            gex = calculate_gex("SPY")
+            if gex:
+                parts.append(format_gex_hebrew(gex))
+        except Exception:
+            pass
+
+        try:
+            from app.services.advance_decline import get_ad_line, format_ad_line_hebrew
+            ad = get_ad_line()
+            if ad:
+                parts.append(format_ad_line_hebrew(ad))
+        except Exception:
+            pass
+
     return "\n\n".join(parts) if parts else ""
 
 

@@ -484,6 +484,42 @@ class MarketRegimeAgent:
         )
         logger.info("Verdict: %s", verdict)
 
+        # 3b. GEX analysis — can downgrade GREEN to YELLOW
+        gex_text = ""
+        try:
+            from app.services.gex_calculator import calculate_gex, format_gex_hebrew
+            gex = calculate_gex("SPY")
+            if gex:
+                gex_text = format_gex_hebrew(gex)
+                logger.info("GEX regime: %s zero_gamma=%.2f", gex.gamma_regime, gex.zero_gamma)
+                if gex.gamma_regime == "NEGATIVE" and verdict == "GREEN":
+                    verdict = "YELLOW"
+                    logger.info(
+                        "Verdict downgraded GREEN→YELLOW: GEX Negative Gamma "
+                        "(SPY below Zero Gamma $%.2f)", gex.zero_gamma
+                    )
+        except Exception as e:
+            logger.debug("GEX in Agent 1 failed: %s", e)
+
+        # 3c. A/D Line divergence — bearish divergence downgrades GREEN to YELLOW
+        ad_text = ""
+        try:
+            from app.services.advance_decline import get_ad_line, format_ad_line_hebrew
+            ad = get_ad_line()
+            if ad:
+                ad_text = format_ad_line_hebrew(ad)
+                if ad.divergence == "BEARISH" and verdict == "GREEN":
+                    verdict = "YELLOW"
+                    logger.info(
+                        "Verdict downgraded GREEN→YELLOW: Bearish A/D divergence "
+                        "(breadth=%.0f%% vs SPY %.1f%%)",
+                        ad.breadth_score, ad.spy_1m_change,
+                    )
+        except Exception as e:
+            logger.debug("A/D Line in Agent 1 failed: %s", e)
+
+        logger.info("Final verdict (after GEX + A/D): %s", verdict)
+
         # 4. Build report
         report = MarketRegimeReport(
             verdict=verdict,
@@ -501,6 +537,8 @@ class MarketRegimeAgent:
                 "perplexity": research.raw_responses,
                 "perplexity_risk": perplexity_risk_desc,
                 "tv_snapshot": tv_snapshot_text,
+                "gex": gex_text,
+                "ad_line": ad_text,
             },
         )
         report.summary_hebrew = _build_hebrew_summary(report)

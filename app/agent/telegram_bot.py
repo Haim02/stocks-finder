@@ -1449,6 +1449,48 @@ def _run_gex_sync(ticker: str, max_dte: int) -> str:
     return format_gex_telegram(result)
 
 
+async def gex_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show GEX analysis (SpotGamma methodology) + A/D Line: /gex [TICKER]"""
+    if not _is_authorized(update):
+        return
+
+    symbol = context.args[0].upper() if context.args else "SPY"
+    await update.message.reply_text(
+        f"📊 מחשב GEX ל-*{symbol}*...\n"
+        f"_סורק שרשרת אופציות + מחשב Zero Gamma, Call Wall, Put Wall (כ-30 שניות)_",
+        parse_mode="Markdown",
+    )
+
+    try:
+        from app.services.gex_calculator import calculate_gex, format_gex_hebrew
+        from app.services.advance_decline import get_ad_line, format_ad_line_hebrew
+
+        gex, ad = await asyncio.gather(
+            asyncio.to_thread(lambda: calculate_gex(symbol)),
+            asyncio.to_thread(get_ad_line),
+        )
+
+        if gex:
+            msg = format_gex_hebrew(gex)
+            try:
+                await update.message.reply_text(msg, parse_mode="Markdown")
+            except Exception:
+                await update.message.reply_text(msg)
+        else:
+            await update.message.reply_text(f"⚠️ לא הצלחתי לחשב GEX ל-{symbol}")
+
+        if ad:
+            msg = format_ad_line_hebrew(ad)
+            try:
+                await update.message.reply_text(msg, parse_mode="Markdown")
+            except Exception:
+                await update.message.reply_text(msg)
+
+    except Exception as e:
+        logger.exception("gex_command failed for %s", symbol)
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = """🤖 *כל הפקודות שלי*
 
@@ -1494,6 +1536,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 - /spxsignal — SPX 0DTE Signal (קנה Straddle / מכור Condor)
 - /earningstraddle — סורק Straddle לפני Earnings (11 סינונים)
 - /debate AAPL — Bull vs Bear Debate: 4 סוכנים → פסיקה + Strategy
+- /gex — GEX Analysis: Zero Gamma, Call Wall, Put Wall + A/D Line (SpotGamma)
+- /gex QQQ — GEX על QQQ
 
 ━━━━━━━━━━━━━━━━━━━━━━
 💼 *ניהול פוזיציות*
@@ -2350,22 +2394,8 @@ def build_app() -> Application:
 
     app = Application.builder().token(token).build()
 
-    # ── GEX conversational handler — must be registered FIRST ────────────────
-    gex_conv = ConversationHandler(
-        entry_points=[CommandHandler("gex", cmd_gex_start)],
-        states={
-            GEX_WAITING_TICKER: [
-                MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    cmd_gex_receive_ticker,
-                )
-            ],
-        },
-        fallbacks=[CommandHandler("cancel", cmd_gex_cancel)],
-        conversation_timeout=120,
-        name="gex_conversation",
-    )
-    app.add_handler(gex_conv)
+    # ── GEX — SpotGamma methodology (replaces old conversation handler) ──────
+    app.add_handler(CommandHandler("gex", gex_command))
 
     # ── Core ──────────────────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",        cmd_start))
