@@ -284,6 +284,38 @@ class MongoDB:
             return False
 
     @classmethod
+    def ensure_indexes(cls) -> None:
+        """Create TTL and unique indexes — idempotent, safe to call on every startup."""
+        try:
+            from pymongo import ASCENDING, DESCENDING
+            db = cls.get_db()
+
+            # news_alerts_log — TTL 7 days + query index
+            db["news_alerts_log"].create_index(
+                [("timestamp", ASCENDING)],
+                expireAfterSeconds=7 * 24 * 3600,
+                name="ttl_7d",
+                background=True,
+            )
+            db["news_alerts_log"].create_index(
+                [("ticker", ASCENDING), ("timestamp", DESCENDING)],
+                name="ticker_ts",
+                background=True,
+            )
+
+            # user_settings — unique key index
+            db["user_settings"].create_index(
+                [("key", ASCENDING)],
+                unique=True,
+                name="unique_key",
+                background=True,
+            )
+
+            logger.info("MongoDB indexes ensured (news_alerts_log TTL + user_settings unique)")
+        except Exception as e:
+            logger.warning("ensure_indexes failed (non-fatal): %s", e)
+
+    @classmethod
     def save_institutional_pick(cls, pick_data: dict):
         """Saves a stock that passed the Smart Money filter (upsert per day)."""
         try:

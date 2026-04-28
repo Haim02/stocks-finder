@@ -1565,8 +1565,18 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 - "הסבר Iron Condor"
 
 ━━━━━━━━━━━━━━━━━━━━━━
+🔔 *News Alert System*
+- /watchlist — הצג Watchlist נוכחי
+- /watchlist add NVDA — הוסף מניה לסריקה
+- /watchlist remove NVDA — הסר מניה
+- /watchlist scan — סרוק חדשות עכשיו ידנית
+- /watchlist clear — אפס לברירת מחדל
+- /alerts — הצג 10 התראות אחרונות
+
+━━━━━━━━━━━━━━━━━━━━━━
 📅 *אוטומטי:*
 🕙 10:00 Agent 1 | 🕥 10:30 Agent 2
+🔔 15:30 & כל 15 דקות 16:00–23:00 — News Alert סריקה
 🔁 כל שעה Agent 3 | 🕔 16:45 סיכום"""
 
     await update.message.reply_text(msg, parse_mode="Markdown")
@@ -2381,6 +2391,122 @@ async def evaluate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 
+async def watchlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Manage news alert watchlist: /watchlist show|add TICKER|remove TICKER|scan|clear"""
+    if not _is_authorized(update):
+        return
+
+    from app.services.news_alert_engine import (
+        _get_watchlist, add_to_watchlist, remove_from_watchlist,
+        reset_watchlist, run_news_scan_job,
+    )
+
+    args = context.args or []
+    subcmd = args[0].lower() if args else "show"
+
+    if subcmd == "show" or not args:
+        wl = _get_watchlist()
+        tickers_str = " · ".join(f"`{t}`" for t in wl)
+        await update.message.reply_text(
+            f"📋 *Watchlist — {len(wl)} מניות*\n\n{tickers_str}\n\n"
+            f"פקודות:\n"
+            f"• `/watchlist add NVDA` — הוסף\n"
+            f"• `/watchlist remove NVDA` — הסר\n"
+            f"• `/watchlist scan` — סרוק עכשיו\n"
+            f"• `/watchlist clear` — אפס לברירת מחדל",
+            parse_mode="Markdown",
+        )
+
+    elif subcmd == "add":
+        if len(args) < 2:
+            await update.message.reply_text("⚠️ נא לציין טיקר: `/watchlist add NVDA`", parse_mode="Markdown")
+            return
+        ticker = args[1].upper()
+        wl = add_to_watchlist(ticker)
+        await update.message.reply_text(
+            f"✅ `{ticker}` נוסף ל-Watchlist.\nסה\"כ: {len(wl)} מניות.",
+            parse_mode="Markdown",
+        )
+
+    elif subcmd == "remove":
+        if len(args) < 2:
+            await update.message.reply_text("⚠️ נא לציין טיקר: `/watchlist remove NVDA`", parse_mode="Markdown")
+            return
+        ticker = args[1].upper()
+        wl = remove_from_watchlist(ticker)
+        await update.message.reply_text(
+            f"🗑️ `{ticker}` הוסר מה-Watchlist.\nנשארו: {len(wl)} מניות.",
+            parse_mode="Markdown",
+        )
+
+    elif subcmd == "clear":
+        wl = reset_watchlist()
+        await update.message.reply_text(
+            f"♻️ Watchlist אופס לברירת מחדל — {len(wl)} מניות.",
+        )
+
+    elif subcmd == "scan":
+        await update.message.reply_text("🔍 סורק חדשות לכל ה-Watchlist... (עד 2 דקות)")
+        try:
+            alerts = await run_news_scan_job()
+            if alerts:
+                await update.message.reply_text(
+                    f"✅ הסריקה הושלמה — {len(alerts)} התראות נשלחו."
+                )
+            else:
+                await update.message.reply_text("✅ הסריקה הושלמה — אין קטליסטים חמים כרגע.")
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ שגיאה בסריקה: {e}")
+
+    else:
+        await update.message.reply_text(
+            "⚠️ פקודה לא מוכרת.\nאפשרויות: `show` | `add TICKER` | `remove TICKER` | `scan` | `clear`",
+            parse_mode="Markdown",
+        )
+
+
+async def alerts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show last 10 news alerts from MongoDB: /alerts"""
+    if not _is_authorized(update):
+        return
+
+    await update.message.reply_text("📋 טוען התראות אחרונות...")
+
+    try:
+        from app.data.mongo_client import MongoDB
+        db = await asyncio.to_thread(MongoDB.get_db)
+        docs = list(
+            db["news_alerts_log"]
+            .find({}, {"_id": 0})
+            .sort("timestamp", -1)
+            .limit(10)
+        )
+
+        if not docs:
+            await update.message.reply_text("📭 אין התראות קודמות ב-7 הימים האחרונים.")
+            return
+
+        lines = [f"📋 *{len(docs)} התראות אחרונות*\n{'━'*28}"]
+        for doc in docs:
+            ts = doc.get("timestamp")
+            ts_str = ts.strftime("%m/%d %H:%M") if hasattr(ts, "strftime") else str(ts)[:16]
+            magnitude_emoji = {"HIGH": "🚨", "MEDIUM": "⚠️", "LOW": "ℹ️"}.get(doc.get("magnitude", ""), "📰")
+            lines.append(
+                f"\n{magnitude_emoji} *{doc.get('ticker')}* — _{ts_str}_\n"
+                f"  Catalyst: `{doc.get('catalyst_type', 'N/A')}` | Score: `{doc.get('catalyst_score', 0)}`\n"
+                f"  {doc.get('headline', '')[:80]}"
+            )
+
+        try:
+            await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text("\n".join(lines))
+
+    except Exception as e:
+        logger.exception("alerts_command failed")
+        await update.message.reply_text(f"⚠️ שגיאה בטעינת התראות: {e}")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Bot setup + run
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2462,6 +2588,10 @@ def build_app() -> Application:
 
     # ── TradingView Scanner ───────────────────────────────────────────────────
     app.add_handler(CommandHandler("tvscan",          tvscan_command))
+
+    # ── News Alert System ─────────────────────────────────────────────────────
+    app.add_handler(CommandHandler("watchlist",       watchlist_command))
+    app.add_handler(CommandHandler("alerts",          alerts_command))
 
     # ── Free chat — MUST be registered LAST so it doesn't shadow /commands ────
     app.add_handler(

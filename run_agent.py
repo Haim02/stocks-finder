@@ -112,6 +112,13 @@ def run_daemon() -> None:
 
     SCAN_TZ = "Asia/Jerusalem"
 
+    # Ensure MongoDB indexes on startup (idempotent)
+    try:
+        from app.data.mongo_client import MongoDB
+        MongoDB.ensure_indexes()
+    except Exception as e:
+        logger.warning("MongoDB ensure_indexes failed on startup: %s", e)
+
     scheduler = BackgroundScheduler(timezone=SCAN_TZ)
 
     global _orchestrator
@@ -165,6 +172,42 @@ def run_daemon() -> None:
         misfire_grace_time=300,
     )
     logger.info("Daily summary scheduled: 16:45 Israel time (Mon–Fri)")
+
+    # News Alert — every 15 min during US market hours (16:00–23:00 Israel)
+    try:
+        from app.services.news_alert_engine import run_news_scan_sync
+        scheduler.add_job(
+            run_news_scan_sync,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour="16-22",
+                minute="*/15",
+                timezone=SCAN_TZ,
+            ),
+            id="news_alert_scan",
+            name="News Alert Scan (every 15min, 16:00–23:00 Israel)",
+            replace_existing=True,
+            misfire_grace_time=120,
+        )
+        logger.info("News alert scan scheduled: every 15min during 16:00–23:00 Israel (Mon–Fri)")
+
+        # Pre-market scan (15:30 Israel = 08:30 ET)
+        scheduler.add_job(
+            run_news_scan_sync,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour=15,
+                minute=30,
+                timezone=SCAN_TZ,
+            ),
+            id="news_alert_premarket",
+            name="News Alert Pre-Market (15:30 Israel)",
+            replace_existing=True,
+            misfire_grace_time=300,
+        )
+        logger.info("News alert pre-market scan scheduled: 15:30 Israel time (Mon–Fri)")
+    except ImportError:
+        logger.warning("news_alert_engine not available — news alert jobs skipped")
 
     scheduler.start()
 
