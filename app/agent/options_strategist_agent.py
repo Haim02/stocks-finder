@@ -54,15 +54,15 @@ from app.services.openai_sentiment import score_tickers_batch
 logger = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-SCAN_LIMIT        = 20    # Finviz candidates per direction
-XGB_TOP_N         = 10    # keep top N after XGBoost scoring
+SCAN_LIMIT        = 30    # Finviz candidates per direction (was 20)
+XGB_TOP_N         = 14    # keep top N after XGBoost scoring (was 10)
 COOLDOWN_DAYS     = 5     # skip tickers sent in last N days
 FINAL_TOP_N       = 3     # max trade ideas to send
 
-# 7-step thresholds (TheOptionPremium methodology)
-MIN_IV_RANK       = 25    # minimum to even consider
-PREFERRED_IV_RANK = 35    # preferred threshold
-MIN_IV_PCT        = 50    # IV Percentile dual confirmation
+# 7-step thresholds — loosened to let more stocks through
+MIN_IV_RANK       = 20    # was 25 — IV Rank 20%+ is enough
+PREFERRED_IV_RANK = 35    # preferred threshold (Tastytrade ideal)
+MIN_IV_PCT        = 35    # was 50 — less strict dual confirmation
 TARGET_DELTA_LOW  = 0.15
 TARGET_DELTA_HIGH = 0.30
 DTE_MIN           = 30
@@ -303,9 +303,15 @@ def _build_trade_idea(
     # Get REAL IV data from yfinance options chain
     iv_data = get_realtime_iv_data(ticker)
 
+    logger.info(
+        "Screening %s — price=$%.2f iv_rank=%.1f iv_pct=%.1f spread=%.1f%% liquid=%s",
+        ticker, iv_data.current_price, iv_data.iv_rank,
+        iv_data.iv_percentile, iv_data.bid_ask_spread_pct, iv_data.is_liquid,
+    )
+
     # Step 1: Liquidity check
     if not iv_data.is_liquid:
-        logger.info("SKIP %s — bid-ask spread %.1f%% > 10%%", ticker, iv_data.bid_ask_spread_pct)
+        logger.info("SKIP %s — bid-ask spread %.1f%% > %.0f%%", ticker, iv_data.bid_ask_spread_pct, MAX_SPREAD_PCT * 100)
         return None
 
     if iv_data.current_price <= 0:
@@ -314,12 +320,12 @@ def _build_trade_idea(
 
     # Step 3: IV Rank minimum
     if iv_data.iv_rank < MIN_IV_RANK:
-        logger.info("SKIP %s — IV Rank %.1f < %d", ticker, iv_data.iv_rank, MIN_IV_RANK)
+        logger.info("SKIP %s — IV Rank %.1f < %d (threshold)", ticker, iv_data.iv_rank, MIN_IV_RANK)
         return None
 
     # Step 4: IV Percentile dual confirmation
     if iv_data.iv_percentile < MIN_IV_PCT:
-        logger.info("SKIP %s — IV Percentile %.1f < %d", ticker, iv_data.iv_percentile, MIN_IV_PCT)
+        logger.info("SKIP %s — IV Percentile %.1f < %d (threshold)", ticker, iv_data.iv_percentile, MIN_IV_PCT)
         return None
 
     # Step 5: Expected move (REAL, from yfinance IV)
@@ -568,10 +574,27 @@ class OptionsStrategistAgent:
 
         # 2. Finviz scan
         from app.services.finviz_service import FinvizService
-        raw_bullish = FinvizService.get_bullish_tickers(n=SCAN_LIMIT)
-        raw_bearish = FinvizService.get_bearish_tickers(n=SCAN_LIMIT)
+        finviz_bullish = FinvizService.get_bullish_tickers(n=SCAN_LIMIT)
+        finviz_bearish = FinvizService.get_bearish_tickers(n=SCAN_LIMIT)
+        logger.info("Finviz: %d bullish, %d bearish", len(finviz_bullish), len(finviz_bearish))
+
+        # 2b. TradingView strong_buy scan — adds more candidates
+        raw_bullish = list(finviz_bullish)
+        raw_bearish = list(finviz_bearish)
+        try:
+            from app.services.tradingview_service import scan_by_signal_type
+            tv_strong_buy = scan_by_signal_type("strong_buy", limit=15)
+            tv_tickers = [r["symbol"] for r in tv_strong_buy if r.get("symbol")]
+            # Add TV tickers to bullish list (dedup)
+            raw_bullish = list(dict.fromkeys(finviz_bullish + tv_tickers))
+            logger.info(
+                "Total bullish universe: %d (Finviz: %d + TV strong_buy: %d)",
+                len(raw_bullish), len(finviz_bullish), len(tv_tickers),
+            )
+        except Exception as e:
+            logger.debug("TV universe expansion failed: %s", e)
+
         candidates_scanned = len(raw_bullish) + len(raw_bearish)
-        logger.info("Finviz: %d bullish, %d bearish", len(raw_bullish), len(raw_bearish))
 
         # 3. XGBoost filter — score each candidate, keep top half per direction
         from app.services.ml_service import predict_confidence
