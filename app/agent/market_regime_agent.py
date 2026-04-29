@@ -518,7 +518,28 @@ class MarketRegimeAgent:
         except Exception as e:
             logger.debug("A/D Line in Agent 1 failed: %s", e)
 
-        logger.info("Final verdict (after GEX + A/D): %s", verdict)
+        # 3d. Fama-French regime — enriches report (no verdict change)
+        ff_text = ""
+        try:
+            from app.services.fama_french_service import get_current_market_regime_ff
+            ff_regime = get_current_market_regime_ff()
+            if ff_regime:
+                ff_notes = []
+                if ff_regime.get("smb_note"):
+                    ff_notes.append(ff_regime["smb_note"])
+                if ff_regime.get("hml_note"):
+                    ff_notes.append(ff_regime["hml_note"])
+                ff_text = "\n".join(ff_notes)
+                logger.info(
+                    "FF regime: favors_small=%s favors_value=%s mkt_20d=%.3f%%",
+                    ff_regime.get("favors_small_cap"),
+                    ff_regime.get("favors_value"),
+                    ff_regime.get("mkt_20d", 0),
+                )
+        except Exception as e:
+            logger.debug("FF regime in Agent 1 failed: %s", e)
+
+        logger.info("Final verdict (after GEX + A/D + FF): %s", verdict)
 
         # 4. Build report
         report = MarketRegimeReport(
@@ -539,6 +560,7 @@ class MarketRegimeAgent:
                 "tv_snapshot": tv_snapshot_text,
                 "gex": gex_text,
                 "ad_line": ad_text,
+                "ff_regime": ff_text,
             },
         )
         report.summary_hebrew = _build_hebrew_summary(report)

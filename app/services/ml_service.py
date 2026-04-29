@@ -59,6 +59,20 @@ MACRO_FEATURE_COLS = [
     "cpi_yoy",    # FRED CPIAUCSL YoY % — inflation regime signal
 ]
 
+# Fama-French factor features added in v4
+FF_FEATURE_COLS = [
+    "ff_mkt_avg",        # average market excess return (252d)
+    "ff_smb_avg",        # average SMB factor (small vs large cap)
+    "ff_hml_avg",        # average HML factor (value vs growth)
+    "ff_mom_avg",        # average momentum factor
+    "ff_mkt_corr",       # stock-market correlation (beta proxy)
+    "ff_recent_smb",     # SMB trend last 20 days
+    "ff_recent_hml",     # HML trend last 20 days
+    "ff_recent_mom",     # momentum trend last 20 days
+    "ff_value_regime",   # 1 = value environment, 0 = growth
+    "ff_momentum_regime", # 1 = momentum positive, 0 = negative
+]
+
 # Full feature list used for training and inference
 FEATURE_COLS = TECHNICAL_FEATURE_COLS + SENTIMENT_FEATURE_COLS + MACRO_FEATURE_COLS
 
@@ -235,6 +249,31 @@ def add_macro_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def add_ff_features(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
+    """Add Fama-French factor features to a feature DataFrame (v4)."""
+    df = df.copy()
+    defaults = {col: 0.0 for col in FF_FEATURE_COLS}
+    defaults["ff_value_regime"] = 0
+    defaults["ff_momentum_regime"] = 0
+    for col, val in defaults.items():
+        df[col] = val
+
+    try:
+        from app.services.fama_french_service import get_ff_features_for_ticker
+        ff_features = get_ff_features_for_ticker(ticker, lookback_days=252)
+        if ff_features:
+            for key, val in ff_features.items():
+                if key in FF_FEATURE_COLS:
+                    df[key] = val
+            logger.info("Added %d FF features for %s", len(ff_features), ticker)
+        else:
+            logger.debug("FF features not available for %s — using defaults", ticker)
+    except Exception as e:
+        logger.debug("add_ff_features failed for %s: %s", ticker, e)
+
+    return df
+
+
 def label_rows(df: pd.DataFrame) -> pd.Series:
     """
     For every row label 1 if the max Close over the next FORWARD_DAYS
@@ -303,6 +342,10 @@ def predict_confidence(ticker: str) -> float | None:
         # Only add macro features if the model was trained with them
         if "fed_rate" in feature_cols:
             df = add_macro_features(df)
+
+        # Only add Fama-French features if the model was trained with them
+        if "ff_mkt_corr" in feature_cols:
+            df = add_ff_features(df, ticker)
 
         df = df.dropna(subset=feature_cols)
         if df.empty:

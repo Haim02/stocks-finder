@@ -159,6 +159,15 @@ def analyze_zero_dte(symbol: str = "SPY") -> Optional[ZeroDTESetup]:
             return None
 
         price = iv_data.current_price
+        try:
+            from app.services.realtime_stream import get_live_price
+            live_price = get_live_price(symbol)
+            if live_price and live_price > 0:
+                price = live_price
+                logger.info("Using live price for 0DTE %s: $%.2f", symbol, price)
+        except Exception:
+            pass  # fall back to iv_data.current_price
+
         iv = iv_data.iv_current / 100  # convert to decimal
         if iv <= 0:
             iv = 0.20  # default 20% IV

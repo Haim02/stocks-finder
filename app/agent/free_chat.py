@@ -176,6 +176,18 @@ def _fetch_stock_data(ticker: str) -> str:
     """
     results = []
 
+    # 0. Live price (WebSocket if available, history fallback)
+    try:
+        from app.services.realtime_stream import get_live_price, format_live_price_note
+        live_price = get_live_price(ticker)
+        if live_price:
+            results.append(
+                f"[מחיר חי — {ticker}]\n"
+                f"מחיר: {format_live_price_note(ticker, live_price)}"
+            )
+    except Exception:
+        pass
+
     # 1. Deep smart scan (fundamentals + momentum + Perplexity AI insight)
     try:
         from app.services.smart_scanner import deep_scan_ticker, format_smart_scan_hebrew

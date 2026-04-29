@@ -370,6 +370,15 @@ async def scan_news_for_ticker(ticker: str) -> Optional[NewsAlert]:
             return None
 
         iv_rank = await asyncio.to_thread(get_iv_rank, ticker)
+
+        try:
+            from app.services.realtime_stream import get_live_price
+            live_price = await asyncio.to_thread(get_live_price, ticker)
+            if live_price:
+                logger.info("Live price for %s: $%.2f", ticker, live_price)
+        except Exception:
+            live_price = None
+
         expected_move, magnitude = _estimate_move(catalyst_type, score)
         action = _recommend_action(catalyst_type, score, iv_rank)
 

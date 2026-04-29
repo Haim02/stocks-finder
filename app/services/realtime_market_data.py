@@ -300,6 +300,19 @@ def get_realtime_iv_data(ticker: str) -> RealTimeIVData:
 
     logger.info("Fetching real-time IV data for %s...", ticker)
 
+    # Step 0: IBKR IV — most accurate, fixes CAR-type 0.1% yfinance errors
+    ibkr_iv_override: Optional[float] = None
+    import os
+    if os.getenv("IBKR_ENABLED", "false").lower() == "true":
+        try:
+            from app.services.ibkr_service import get_real_iv_from_ibkr
+            ibkr_iv = get_real_iv_from_ibkr(ticker)
+            if ibkr_iv and ibkr_iv > 1.0:
+                ibkr_iv_override = ibkr_iv
+                logger.info("IBKR IV override for %s: %.1f%%", ticker, ibkr_iv)
+        except Exception as e:
+            logger.debug("IBKR IV failed, using yfinance: %s", e)
+
     # Step 1: Get current price
     try:
         stock = yf.Ticker(ticker)
@@ -320,6 +333,11 @@ def get_realtime_iv_data(ticker: str) -> RealTimeIVData:
     current_iv_pct = current_iv_raw * 100  # convert to percentage
 
     data_source = "yfinance" if current_iv_raw > 0 else "proxy"
+
+    # Apply IBKR override if available (most accurate — fixes CAR-type errors)
+    if ibkr_iv_override:
+        current_iv_pct = ibkr_iv_override
+        data_source = "ibkr"
 
     # Sanity check — standard ATM filter misses meme/short-squeeze stocks
     if current_iv_pct < 5.0:

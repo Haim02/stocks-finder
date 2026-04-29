@@ -18,6 +18,7 @@ scikit-learn
 xgboost
 joblib
 ta
+pandas-datareader>=0.10.0
 
 # ── AI / LLM ───────────────────────────────────────────────────
 openai
