@@ -1,90 +1,103 @@
-import requests
+import logging
+
 import yfinance as yf
 import pandas as pd
-from app.core.config import settings
-from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
+
 
 class DataFetcher:
     @staticmethod
     def get_stock_data(ticker):
-        """
-        מושך נתוני מחיר היסטוריים מ-Yahoo Finance.
-        כולל הגנות מפני נתונים ריקים והמרת שמות עמודות.
-        """
+        """Historical OHLCV data from yfinance."""
         try:
             stock = yf.Ticker(ticker)
-            # משיכת נתונים לשנה האחרונה
             df = stock.history(period="1y", timeout=15)
 
-            # בדיקה אם חזרו נתונים בכלל
             if df is None or df.empty or len(df) < 50:
                 print(f"⚠️ No sufficient data for {ticker}")
                 return None
 
-            # תיקון שמות עמודות לאותיות קטנות (פותר את שגיאת 'close')
             df.columns = [col.lower() for col in df.columns]
-
             return df
         except Exception as e:
             print(f"❌ Error fetching price data for {ticker}: {e}")
             return None
 
     @staticmethod
-    def get_finnhub_fundamentals(ticker):
-        """
-        מושך נתונים פונדמנטליים (מכפילים, צמיחה, חוב) מ-Finnhub.
-        """
-        url = f"https://finnhub.io/api/v1/stock/metric?symbol={ticker}&metric=all&token={settings.FINNHUB_API_KEY}"
+    def get_fundamentals(ticker):
+        """Fundamentals from yfinance info — replaces Finnhub metrics."""
         try:
-            response = requests.get(url, timeout=10)
-            res = response.json()
-            metrics = res.get('metric', {})
-
+            info = yf.Ticker(ticker).info
             return {
-                "pe_ratio": metrics.get('peExclExtraTTM', 'N/A'),
-                "ps_ratio": metrics.get('psTTM', 'N/A'),
-                "revenue_growth_yoy": metrics.get('revenueGrowthQuarterlyYoy', 'N/A'),
-                "debt_to_equity": metrics.get('totalDebt/totalEquityQuarterly', 'N/A'),
-                "net_margin": metrics.get('netProfitMarginTTM', 'N/A'),
-                "52_week_high": metrics.get('52WeekHigh', 'N/A')
+                "pe_ratio":           info.get("trailingPE") or info.get("forwardPE", "N/A"),
+                "ps_ratio":           info.get("priceToSalesTrailing12Months", "N/A"),
+                "revenue_growth_yoy": info.get("revenueGrowth", "N/A"),
+                "debt_to_equity":     info.get("debtToEquity", "N/A"),
+                "net_margin":         info.get("profitMargins", "N/A"),
+                "52_week_high":       info.get("fiftyTwoWeekHigh", "N/A"),
             }
         except Exception as e:
-            print(f"⚠️ Finnhub fundamentals error for {ticker}: {e}")
+            logger.debug("get_fundamentals failed for %s: %s", ticker, e)
             return {}
 
     @staticmethod
-    def get_finnhub_news(ticker):
-        """
-        מושך את 5 כותרות החדשות האחרונות מהשבוע האחרון דרך Finnhub.
-        """
-        to_date = datetime.now().strftime('%Y-%m-%d')
-        from_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-
-        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={from_date}&to={to_date}&token={settings.FINNHUB_API_KEY}"
+    def get_news(ticker):
+        """Latest news headlines from yfinance — replaces Finnhub news."""
         try:
-            response = requests.get(url, timeout=10)
-            news = response.json()
-
-            # מחזיר רק את הכותרות של 5 הידיעות הראשונות
-            if isinstance(news, list):
-                return [n['headline'] for n in news[:5]]
-            return []
+            news = yf.Ticker(ticker).news or []
+            return [
+                item.get("content", {}).get("title", "")
+                for item in news[:5]
+                if item.get("content", {}).get("title")
+            ]
         except Exception as e:
-            print(f"⚠️ Finnhub news error for {ticker}: {e}")
+            logger.debug("get_news failed for %s: %s", ticker, e)
             return []
 
     @staticmethod
     def get_company_profile(ticker):
-        """
-        אופציונלי: מושך תיאור קצר על החברה (סקטור, תעשייה).
-        """
-        url = f"https://finnhub.io/api/v1/stock/profile2?symbol={ticker}&token={settings.FINNHUB_API_KEY}"
+        """Company profile from yfinance — replaces Finnhub profile2."""
         try:
-            res = requests.get(url, timeout=10).json()
+            info = yf.Ticker(ticker).info
             return {
-                "name": res.get('name', ticker),
-                "industry": res.get('finnhubIndustry', 'N/A'),
-                "market_cap": res.get('marketCapitalization', 'N/A')
+                "name":       info.get("longName") or info.get("shortName", ticker),
+                "industry":   info.get("industry", "N/A"),
+                "market_cap": info.get("marketCap", "N/A"),
             }
-        except:
+        except Exception:
             return {"name": ticker, "industry": "N/A"}
+
+    @staticmethod
+    def get_institutional_data(ticker):
+        """Institutional holders, major holders, insider transactions from yfinance."""
+        try:
+            stock = yf.Ticker(ticker)
+            inst   = stock.institutional_holders
+            major  = stock.major_holders
+            insider = stock.insider_transactions
+            return {
+                "institutional_holders": inst.to_dict()    if inst    is not None and not inst.empty    else {},
+                "major_holders":         major.to_dict()   if major   is not None and not major.empty   else {},
+                "insider_transactions":  insider.to_dict() if insider is not None and not insider.empty else {},
+            }
+        except Exception as e:
+            logger.debug("get_institutional_data failed for %s: %s", ticker, e)
+            return {}
+
+    @staticmethod
+    def get_smart_money_signal(ticker: str) -> str:
+        """Insider/institutional sentiment via Perplexity — replaces Finnhub insider_sentiment."""
+        try:
+            from app.services.perplexity_service import PerplexityService
+            svc = PerplexityService()
+            if svc.is_available():
+                return svc.search(
+                    f"Recent insider buying or selling for {ticker} stock. "
+                    f"Any institutional accumulation or 13F filings showing large positions? "
+                    f"2 sentences only.",
+                    max_chars=200,
+                )
+        except Exception:
+            pass
+        return ""

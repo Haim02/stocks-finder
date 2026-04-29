@@ -1,10 +1,7 @@
 import logging
 
-import finnhub
 import numpy as np
 import yfinance as yf
-
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +19,7 @@ def _fmt_num(v: float | None) -> str:
 
 class FinancialAnalyzer:
     def __init__(self):
-        self.client = (
-            finnhub.Client(api_key=settings.FINNHUB_API_KEY)
-            if settings.FINNHUB_API_KEY
-            else None
-        )
+        pass
 
     def analyze(self, ticker: str) -> dict | None:
         """
