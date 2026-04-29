@@ -2005,73 +2005,38 @@ async def ivscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Run professional backtest with 6 strategies via TradingView."""
+    """Run Bull Put Spread backtest via backtest_engine.py."""
     if not _is_authorized(update):
         return
 
     args = context.args
     if not args:
         await update.message.reply_text(
-            "📝 שימוש: `/backtest TICKER [strategy]`\n\n"
-            "אסטרטגיות: `rsi`, `bollinger`, `macd`, `ema_cross`, `supertrend`, `donchian`\n"
-            "ללא strategy = כל 6 האסטרטגיות\n\n"
-            "דוגמה: `/backtest AAPL` או `/backtest NVDA supertrend`",
+            "📝 שימוש: `/backtest TICKER`\nדוגמה: `/backtest AAPL`",
             parse_mode="Markdown",
         )
         return
 
     ticker = args[0].upper()
-    strategy = args[1].lower() if len(args) > 1 else None
     await update.message.reply_text(f"📊 מריץ Backtest על {ticker}... (כ-20 שניות)")
 
     try:
-        from app.services.tradingview_service import (
-            compare_all_strategies, run_backtest,
-            format_backtest_comparison_hebrew,
+        from app.services.backtest_engine import (
+            backtest_bull_put_spread,
+            format_backtest_hebrew,
         )
-
-        if strategy:
-            result = await asyncio.to_thread(
-                lambda: run_backtest(ticker, strategy=strategy, period="2y")
-            )
-            if result:
-                ret = result.get("total_return", 0)
-                sharpe = result.get("sharpe_ratio", 0)
-                wr = result.get("win_rate", 0)
-                trades = result.get("total_trades", 0)
-                max_dd = result.get("max_drawdown", 0)
-                bh = result.get("buy_and_hold_return", 0)
-                verdict = "✅ האסטרטגיה עדיפה על Buy&Hold" if ret > bh else "🟡 Buy&Hold עדיף"
-                msg = (
-                    f"📊 *Backtest — {ticker} ({strategy.upper()})*\n"
-                    f"{'━'*28}\n\n"
-                    f"📈 תשואה: `{ret:+.1f}%` | Buy&Hold: `{bh:+.1f}%`\n"
-                    f"📊 Sharpe Ratio: `{sharpe:.2f}`\n"
-                    f"🎯 Win Rate: `{wr:.0f}%`\n"
-                    f"📉 Max Drawdown: `{max_dd:.1f}%`\n"
-                    f"🔢 עסקאות: `{trades}`\n\n"
-                    f"{verdict}"
-                )
-            else:
-                # Fallback to original engine
-                from app.services.backtest_engine import backtest_bull_put_spread, format_backtest_hebrew
-                r = await asyncio.to_thread(lambda: backtest_bull_put_spread(ticker))
-                msg = format_backtest_hebrew(r) if r else f"⚠️ לא הצלחתי להריץ backtest על {ticker}"
+        result = await asyncio.to_thread(lambda: backtest_bull_put_spread(ticker))
+        if result:
+            msg = format_backtest_hebrew(result)
+            try:
+                await update.message.reply_text(msg, parse_mode="Markdown")
+            except Exception:
+                await update.message.reply_text(msg)
         else:
-            result = await asyncio.to_thread(
-                lambda: compare_all_strategies(ticker, period="2y")
+            await update.message.reply_text(
+                f"⚠️ לא הצלחתי להריץ backtest על {ticker}.\n"
+                f"ייתכן שאין מספיק היסטוריה או אופציות זמינות."
             )
-            msg = format_backtest_comparison_hebrew(ticker, result) if result else ""
-            if not msg:
-                # Fallback to original engine
-                from app.services.backtest_engine import backtest_bull_put_spread, format_backtest_hebrew
-                r = await asyncio.to_thread(lambda: backtest_bull_put_spread(ticker))
-                msg = format_backtest_hebrew(r) if r else f"⚠️ לא הצלחתי להריץ backtest על {ticker}"
-
-        try:
-            await update.message.reply_text(msg, parse_mode="Markdown")
-        except Exception:
-            await update.message.reply_text(msg)
     except Exception as e:
         logger.exception("backtest_command failed for %s", ticker)
         await update.message.reply_text(f"⚠️ שגיאה: {e}")

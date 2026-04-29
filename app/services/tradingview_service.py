@@ -287,3 +287,8 @@ def format_market_snapshot_hebrew(data: dict) -> str:
 
 def format_backtest_comparison_hebrew(ticker: str, data: dict) -> str:
     return ""  # Placeholder — backtest_engine.py handles this
+
+
+def compare_all_strategies(ticker: str, period: str = "1y") -> Optional[dict]:
+    """Placeholder — returns None, backtest_engine handles this."""
+    return None
