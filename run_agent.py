@@ -209,6 +209,80 @@ def run_daemon() -> None:
     except ImportError:
         logger.warning("news_alert_engine not available — news alert jobs skipped")
 
+    # ── Live Monitor — 24/7 proactive intelligence ────────────────────────────
+    try:
+        from app.services.live_monitor import (
+            run_15min_scan_sync,
+            run_30min_crawl_sync,
+            run_morning_briefing_sync,
+            run_evening_summary_sync,
+        )
+
+        # Price moves + IV spikes + earnings warnings + news catalysts
+        scheduler.add_job(
+            run_15min_scan_sync,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour="16-23",
+                minute="*/15",
+                timezone=SCAN_TZ,
+            ),
+            id="live_monitor_15min",
+            name="Live Monitor — 15min scan (16:00–23:00 Israel)",
+            replace_existing=True,
+            misfire_grace_time=120,
+        )
+
+        # SEC filings / Fed / options flow crawl
+        scheduler.add_job(
+            run_30min_crawl_sync,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour="16-23",
+                minute="*/30",
+                timezone=SCAN_TZ,
+            ),
+            id="web_crawler_30min",
+            name="Web Crawler — 30min (SEC/Fed/Flow)",
+            replace_existing=True,
+            misfire_grace_time=120,
+        )
+
+        # Morning briefing (09:00 Israel)
+        scheduler.add_job(
+            run_morning_briefing_sync,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour=9,
+                minute=0,
+                timezone=SCAN_TZ,
+            ),
+            id="morning_briefing",
+            name="Morning Briefing (09:00 Israel)",
+            replace_existing=True,
+            misfire_grace_time=300,
+        )
+
+        # Evening summary (23:30 Israel)
+        scheduler.add_job(
+            run_evening_summary_sync,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour=23,
+                minute=30,
+                timezone=SCAN_TZ,
+            ),
+            id="evening_summary",
+            name="Evening Summary (23:30 Israel)",
+            replace_existing=True,
+            misfire_grace_time=300,
+        )
+        logger.info(
+            "Live monitor scheduled: 15min scans + 30min crawl + morning/evening briefings"
+        )
+    except ImportError:
+        logger.warning("live_monitor not available — live monitor jobs skipped")
+
     scheduler.start()
 
     next_run = scheduler.get_job("morning_pipeline").next_run_time

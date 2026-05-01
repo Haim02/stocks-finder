@@ -1635,7 +1635,19 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 - /alerts — הצג 10 התראות אחרונות
 
 ━━━━━━━━━━━━━━━━━━━━━━
-📅 *אוטומטי:*
+🤖 *ניטור אוטומטי 24/7*
+- /monitor — הפעל סריקה ידנית עכשיו
+- /briefing — דוח בוקר ידני
+- /watchlist add TICKER — הוסף למעקב אוטומטי
+
+🤖 *אוטומטי (בלי לבקש):*
+🌅 09:00 — דוח בוקר: שוק + לוח אירועים + GEX
+⚡ כל 15 דקות — תנועות >3%, IV Spike, חדשות
+🕷️ כל 30 דקות — SEC, Fed, Options Flow
+🌙 23:30 — סיכום יום + מה לצפות מחר
+
+━━━━━━━━━━━━━━━━━━━━━━
+📅 *אוטומטי (סוכנים):*
 🕙 10:00 Agent 1 | 🕥 10:30 Agent 2
 🔔 15:30 & כל 15 דקות 16:00–23:00 — News Alert סריקה
 🔁 כל שעה Agent 3 | 🕔 16:45 סיכום"""
@@ -2615,6 +2627,32 @@ async def alerts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+async def monitor_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/monitor — Manual trigger for live monitor 15min scan."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text("🔍 מריץ סריקה ידנית עכשיו...")
+    try:
+        from app.services.live_monitor import run_15min_scan
+        await run_15min_scan()
+        await update.message.reply_text("✅ סריקה הושלמה. אם יש התראות — נשלחו.")
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
+async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/briefing — Manual morning briefing."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text("🌅 מכין דוח בוקר...")
+    try:
+        from app.services.live_monitor import send_morning_briefing
+        await send_morning_briefing()
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Bot setup + run
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -2705,6 +2743,10 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("learn_url",       learn_url_command))
     app.add_handler(CommandHandler("myprofile",       myprofile_command))
     app.add_handler(CommandHandler("memory",          memory_command))
+
+    # ── Live monitor (manual triggers) ────────────────────────────────────────
+    app.add_handler(CommandHandler("monitor",         monitor_command))
+    app.add_handler(CommandHandler("briefing",        briefing_command))
 
     # ── Free chat — MUST be registered LAST so it doesn't shadow /commands ────
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))

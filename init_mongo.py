@@ -28,6 +28,7 @@ def init_db():
         ("options_strategist_reports", "timestamp",  14 * 24 * 3600),
         ("agent_run_log",              "started_at",  7 * 24 * 3600),
         ("training_events",            "timestamp",  90 * 24 * 3600),
+        ("monitor_alerts_log",         "timestamp",   7 * 24 * 3600),
     ]
     for collection, field, ttl in ttl_indexes:
         try:
