@@ -1516,111 +1516,72 @@ async def gex_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    msg = """🤖 *כל הפקודות שלי*
+    msg = """🤖 *HAI — סוכן מסחר AI אישי*
 
 ━━━━━━━━━━━━━━━━━━━━━━
 🧠 *סוכנים*
-- /status — מצב כל 3 הסוכנים
-- /regime — Agent 1 ידנית (שוק + מאקרו)
-- /strategist — Agent 2 ידנית (המלצות טריידים)
-- /riskcheck — Agent 3 ידנית (ניהול סיכונים)
+• /status — מצב כל 3 הסוכנים
+• /regime — ניתוח שוק יומי
+• /strategist — המלצות עסקאות
+• /riskcheck — ניהול סיכונים
 
 ━━━━━━━━━━━━━━━━━━━━━━
 📊 *סריקות*
-- /dailyscan — סריקה יומית + ML confidence
-- /optionsscan — דוח אופציות יומי
-- /smartmoney — זיהוי צבירה מוסדית
-- /news — חדשות שוק בזמן אמת
-- /intelligence — מאקרו + רוטציית סקטורים
-- /otc — סורק מניות OTC
-- /scan — Options Scanner (IV אמיתי)
-- /scan AAPL NVDA — סריקה ספציפית
-- /internet <שאלה> — חיפוש ישיר באינטרנט בזמן אמת (Perplexity)
-- /ivscan — מניות עם IV גבוה + הסבר למה (X/Perplexity)
-- /ivscan AAPL TSLA — סריקה ספציפית
-- /ivscan --min-rank 70 — רק IV Rank > 70%
-- /deepscan — סריקת טרנדים חמים: פונדמנטלס + מומנטום + AI
-- /deepscan AMZN NVDA — ניתוח עמוק על מניות ספציפיות
-- /csp — סריקת Cash Secured Put (מניות עד $20)
-- /csp 10 — CSP רק מניות עד $10
-- /csp SOFI PLTR — CSP על מניות ספציפיות
-- /tvscan oversold — סריקת TradingView לפי סיגנל (30+ אינדיקטורים)
-- /tvscan strong_buy — מניות עם STRONG BUY מ-TradingView
-- /backtest AAPL — Backtest 6 אסטרטגיות (Sharpe + Win Rate + vs Buy&Hold)
+• /scan — Options Scanner (IV אמיתי)
+• /zerod — 0DTE Analysis
+• /ivscan — מניות IV גבוה
+• /tvscan oversold — TradingView scan
+• /csp — Cash Secured Put Scanner
+• /deepscan — ניתוח עמוק AI
+• /debate TICKER — Bull vs Bear
+• /earningstraddle — Earnings Straddle
+• /gex — GEX Analysis + A/D Line
+• /chainscreen TICKER — Chain Screener
+• /spxsignal — SPX 0DTE Signal
+• /backtest TICKER — Backtest היסטורי
+• /internet שאלה — חיפוש ישיר Perplexity
 
 ━━━━━━━━━━━━━━━━━━━━━━
-🎯 *אסטרטגיות ואופציות*
-- /strategies — S&P 500 + Nasdaq
-- /strategies AAPL TSLA — מניות ספציפיות
-- /zerod — 0DTE Analysis על SPY + QQQ
-- /zerod AAPL — 0DTE על מניה ספציפית
-- /evaluate AAPL — האם שווה להיכנס לעסקה?
-- /backtest AAPL — Win Rate היסטורי
-- /chainscreen AAPL — chain מלא → Bull Put + BWB
-- /spxsignal — SPX 0DTE Signal (קנה Straddle / מכור Condor)
-- /earningstraddle — סורק Straddle לפני Earnings (11 סינונים)
-- /debate AAPL — Bull vs Bear Debate: 4 סוכנים → פסיקה + Strategy
-- /gex — GEX Analysis: Zero Gamma, Call Wall, Put Wall + A/D Line (SpotGamma)
-- /gex QQQ — GEX על QQQ
-
-━━━━━━━━━━━━━━━━━━━━━━
-💼 *ניהול פוזיציות*
-- /positions — פוזיציות פתוחות
-- /addposition TICKER STRATEGY SHORT LONG CREDIT EXP
-- /closeposition TICKER PRICE
-
-━━━━━━━━━━━━━━━━━━━━━━
-🤖 *מודל ML*
-- /train — אימון מחדש XGBoost
-- /leaderboard — Top 15 מניות לפי ML
+💼 *פוזיציות*
+• /positions — פוזיציות פתוחות
+• /addposition — הוסף פוזיציה
+• /closeposition — סגור פוזיציה
 
 ━━━━━━━━━━━━━━━━━━━━━━
 🧠 *זיכרון ולמידה*
-- /myprofile — הפרופיל שלי (watchlist, אסטרטגיות, ידע)
-- /memory — 5 ההודעות האחרונות
-- /knowledge — רשימת כל הידע שצברת
-- /learn נושא | תוכן — הוסף ידע ישירות
-- /learn_url URL — למד מקישור (אתר, YouTube, GitHub, X)
-- /reset — נקה היסטוריית שיחה (פרופיל נשמר)
-- /help — הרשימה הזו
-
-📎 *שלח קובץ PDF* — אקרא ואלמד ממנו
-🖼️ *שלח תמונה/גרף* — אנתח ואזכור (Claude Vision)
+• /myprofile — הפרופיל שלי
+• /memory — היסטוריית שיחות
+• /summary — סיכום שבועי + תובנות
+• /knowledge — ידע שנלמד
+• /learn_url URL — למד מקישור (אתר, YouTube, GitHub, X)
+• /learn נושא | תוכן — הוסף ידע
+• /settings — הגדרות הסוכן
+• /reset — נקה שיחה
 
 ━━━━━━━━━━━━━━━━━━━━━━
-💬 *Free Chat — פשוט תשאל:*
-- "מה ה-IV של NVDA?"
-- "מה ה-PCR היום?"
-- "תנתח TSLA לפני Earnings"
-- "מה לעשות ב-0DTE היום?"
-- "הסבר Iron Condor"
+📰 *חדשות וניטור*
+• /monitor — סריקה ידנית
+• /briefing — דוח בוקר
+• /watchlist — ניהול מעקב
+• /alerts — היסטוריית התראות
 
 ━━━━━━━━━━━━━━━━━━━━━━
-🔔 *News Alert System*
-- /watchlist — הצג Watchlist נוכחי
-- /watchlist add NVDA — הוסף מניה לסריקה
-- /watchlist remove NVDA — הסר מניה
-- /watchlist scan — סרוק חדשות עכשיו ידנית
-- /watchlist clear — אפס לברירת מחדל
-- /alerts — הצג 10 התראות אחרונות
+🤖 *ML*
+• /train — אימון XGBoost
+• /leaderboard — Top 15 מניות
 
 ━━━━━━━━━━━━━━━━━━━━━━
-🤖 *ניטור אוטומטי 24/7*
-- /monitor — הפעל סריקה ידנית עכשיו
-- /briefing — דוח בוקר ידני
-- /watchlist add TICKER — הוסף למעקב אוטומטי
+📎 *שלח ישירות:*
+• תמונה/גרף → ניתוח Claude Vision
+• PDF → קריאה ולמידה אוטומטית
+• שאלה חופשית → תשובה חכמה עם זיכרון
 
-🤖 *אוטומטי (בלי לבקש):*
-🌅 09:00 — דוח בוקר: שוק + לוח אירועים + GEX
-⚡ כל 15 דקות — תנועות >3%, IV Spike, חדשות
+━━━━━━━━━━━━━━━━━━━━━━
+🔔 *אוטומטי (בלי לבקש):*
+🌅 09:00 דוח בוקר יומי
+⚡ כל 15 דקות — סריקת שוק + התראות
 🕷️ כל 30 דקות — SEC, Fed, Options Flow
-🌙 23:30 — סיכום יום + מה לצפות מחר
-
-━━━━━━━━━━━━━━━━━━━━━━
-📅 *אוטומטי (סוכנים):*
-🕙 10:00 Agent 1 | 🕥 10:30 Agent 2
-🔔 15:30 & כל 15 דקות 16:00–23:00 — News Alert סריקה
-🔁 כל שעה Agent 3 | 🕔 16:45 סיכום"""
+🌙 23:30 סיכום יום + מחר"""
 
     await update.message.reply_text(msg, parse_mode="Markdown")
 
@@ -2808,6 +2769,121 @@ async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 
+async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/settings — Manage agent preferences."""
+    if not _is_authorized(update):
+        return
+
+    from app.services.memory_engine import MemoryEngine
+    mem = MemoryEngine()
+    args = context.args or []
+
+    if not args or args[0].lower() == "show":
+        profile = mem.get_profile()
+        msg = (
+            f"⚙️ *הגדרות נוכחיות:*\n\n"
+            f"• רמת סיכון: `{profile.get('risk_tolerance', 'moderate')}`\n"
+            f"• DTE מועדף: `{profile.get('preferred_dte', '30-45')}`\n"
+            f"• מטרה: {profile.get('goal', 'לא הוגדר')}\n"
+            f"• ברוקר: {profile.get('broker', 'IB Israel')}\n"
+            f"• מניות במעקב: {', '.join(profile.get('watchlist', []))}\n\n"
+            f"פקודות:\n"
+            f"• `/settings risk low/moderate/aggressive`\n"
+            f"• `/settings dte 30`\n"
+            f"• `/settings goal טקסט`"
+        )
+        try:
+            await update.message.reply_text(msg, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(msg)
+        return
+
+    action = args[0].lower()
+
+    if action == "risk" and len(args) > 1:
+        risk = args[1].lower()
+        if risk in ("low", "moderate", "aggressive"):
+            mem.update_profile({"risk_tolerance": risk})
+            await update.message.reply_text(f"✅ רמת סיכון עודכנה: `{risk}`", parse_mode="Markdown")
+        else:
+            await update.message.reply_text("⚠️ השתמש: low / moderate / aggressive")
+
+    elif action == "dte" and len(args) > 1:
+        mem.update_profile({"preferred_dte": args[1]})
+        await update.message.reply_text(f"✅ DTE מועדף: `{args[1]}`", parse_mode="Markdown")
+
+    elif action == "goal" and len(args) > 1:
+        goal = " ".join(args[1:])
+        mem.update_profile({"goal": goal})
+        await update.message.reply_text(f"✅ מטרה עודכנה: {goal}")
+
+    else:
+        await update.message.reply_text("⚠️ פקודה לא מוכרת. שלח `/settings` לעזרה.")
+
+
+async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/summary — Generate weekly conversation summary and insights."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text("📊 מכין סיכום שבועי...")
+
+    try:
+        from app.services.memory_engine import MemoryEngine
+        import anthropic as _anthropic
+
+        mem = MemoryEngine()
+        messages = mem.get_recent_messages(limit=50)
+
+        if not messages:
+            await update.message.reply_text("📭 אין היסטוריית שיחות עדיין.")
+            return
+
+        conversation_text = "\n".join([
+            f"{m['role'].upper()}: {m['content'][:200]}"
+            for m in messages[-30:]
+        ])
+
+        client = _anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=800,
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"סכם את השיחות האחרונות הבאות בין חיים לסוכן:\n\n"
+                    f"{conversation_text}\n\n"
+                    f"כתוב סיכום בעברית הכולל:\n"
+                    f"1. מניות שנדונו\n"
+                    f"2. אסטרטגיות שנדונו\n"
+                    f"3. שאלות חוזרות\n"
+                    f"4. תובנות חשובות\n"
+                    f"5. מה כדאי לעקוב אחריו"
+                )
+            }]
+        )
+
+        summary = response.content[0].text.strip()
+        insights = mem.get_conversation_insights()
+        knowledge = mem.list_knowledge()
+
+        msg = (
+            f"📊 *סיכום שבועי*\n"
+            f"{'━'*28}\n\n"
+            f"{summary}\n\n"
+            f"{'━'*28}\n"
+            f"🧠 *ידע שנצבר:* {len(knowledge)} נושאים\n"
+            f"💬 *שיחות:* {len(messages)} הודעות\n\n"
+            f"📌 *דפוסים שזיהיתי:*\n{insights}"
+        )
+        try:
+            await update.message.reply_text(msg, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(msg)
+
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Bot setup + run
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2905,6 +2981,10 @@ def build_app() -> Application:
     # ── Live monitor (manual triggers) ────────────────────────────────────────
     app.add_handler(CommandHandler("monitor",         monitor_command))
     app.add_handler(CommandHandler("briefing",        briefing_command))
+
+    # ── Agent preferences & summary ───────────────────────────────────────────
+    app.add_handler(CommandHandler("settings",        settings_command))
+    app.add_handler(CommandHandler("summary",         summary_command))
 
     # ── Free chat — MUST be registered LAST so it doesn't shadow /commands ────
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))

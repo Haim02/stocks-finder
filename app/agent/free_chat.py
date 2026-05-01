@@ -429,14 +429,14 @@ class TradingAgent:
             self._build_context, text, tickers, intents
         )
 
-        # System prompt
+        # Dynamic system prompt (evolves with every conversation)
         if self.memory:
-            system_prompt = self.memory.build_system_prompt()
+            system_prompt = self.memory.build_dynamic_system_prompt()
         else:
             system_prompt = _build_fallback_system_prompt()
 
         if context_data:
-            system_prompt += f"\n\n--- נתונים עדכניים לשימושך ---\n{context_data}"
+            system_prompt += f"\n\n═══ נתונים עדכניים ═══\n{context_data}"
 
         # Build conversation history (exclude current turn)
         history = []
@@ -470,6 +470,8 @@ class TradingAgent:
 
         if self.memory:
             self.memory.save_message("assistant", reply)
+            # Self-improvement: learn from this conversation
+            self.memory.learn_from_conversation(text, reply)
 
         return reply
 

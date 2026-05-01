@@ -244,6 +244,144 @@ class MemoryEngine:
             logger.debug("list_knowledge failed: %s", e)
             return []
 
+    # ── Self-Improvement ──────────────────────────────────────────────────────
+
+    def learn_from_conversation(self, user_msg: str, agent_reply: str):
+        """After every conversation, extract and update user preferences."""
+        if self.profile_col is None:
+            return
+        try:
+            # Extract tickers mentioned
+            skip = {"IV", "DTE", "ATM", "OTM", "ITM", "RSI", "VIX", "THE", "AND",
+                    "FOR", "NOT", "ARE", "PDF", "URL", "CEO", "CFO", "IPO"}
+            tickers = [t for t in re.findall(r'\b([A-Z]{2,5})\b', user_msg.upper())
+                       if t not in skip][:5]
+            for ticker in tickers:
+                self.add_mentioned_ticker(ticker)
+
+            # Detect strategy preferences
+            strategy_keywords = {
+                "Bull Put Spread": ["bull put", "put spread", "ספרד"],
+                "Iron Condor": ["iron condor", "condor", "קונדור"],
+                "CSP": ["cash secured put", "csp", "מובטח"],
+                "Covered Call": ["covered call", "קאבר"],
+                "0DTE": ["0dte", "אפס", "intraday"],
+                "LEAPs": ["leaps", "ליפס", "long call"],
+                "Straddle": ["straddle", "סטרדל"],
+            }
+            msg_lower = (user_msg + " " + agent_reply).lower()
+            strategies = [s for s, kws in strategy_keywords.items()
+                          if any(kw in msg_lower for kw in kws)]
+            if strategies:
+                self.profile_col.update_one(
+                    {"_id": "haim"},
+                    {"$addToSet": {"strategies_discussed": {"$each": strategies}}},
+                    upsert=True,
+                )
+
+            # Detect topics of interest
+            topic_keywords = {
+                "earnings": ["earnings", "דוחות", "רבעוני"],
+                "IV analysis": ["iv rank", "implied volatility", "תנודתיות"],
+                "0DTE trading": ["0dte", "intraday", "יומי"],
+                "sector rotation": ["sector", "סקטור", "רוטציה"],
+                "macro": ["fed", "cpi", "פד", "מאקרו"],
+            }
+            topics = [t for t, kws in topic_keywords.items()
+                      if any(kw in msg_lower for kw in kws)]
+            for topic in topics:
+                self.add_topic_of_interest(topic)
+
+            self.update_profile({"last_active": datetime.now(timezone.utc)})
+
+        except Exception as e:
+            logger.debug("learn_from_conversation failed: %s", e)
+
+    def get_conversation_insights(self) -> str:
+        """Generate insights about user behavior from conversation history."""
+        try:
+            profile = self.get_profile()
+            insights = []
+
+            mentioned = profile.get("mentioned_tickers", [])
+            if mentioned:
+                insights.append(f"מניות שנזכרו לאחרונה: {', '.join(mentioned[-10:])}")
+
+            strategies = profile.get("strategies_discussed", [])
+            if strategies:
+                insights.append(f"אסטרטגיות שנדונו: {', '.join(list(set(strategies))[-5:])}")
+
+            topics = profile.get("topics_of_interest", [])
+            if topics:
+                insights.append(f"נושאי עניין: {', '.join(list(set(topics))[-5:])}")
+
+            return "\n".join(insights)
+        except Exception:
+            return ""
+
+    def build_dynamic_system_prompt(self) -> str:
+        """
+        Build a fully dynamic system prompt that evolves with every conversation.
+        This is what makes the agent truly intelligent and personal.
+        """
+        profile  = self.get_profile()
+        insights = self.get_conversation_insights()
+        knowledge_list = self.list_knowledge()
+
+        watchlist  = ", ".join(profile.get("watchlist", [])[:15]) or "SPY, QQQ, NVDA, AAPL"
+        strategies = ", ".join(profile.get("favorite_strategies",
+                                           ["Bull Put Spread", "Iron Condor", "CSP", "0DTE"]))
+        goal       = profile.get("goal", "הכנסה קבועה ממסחר באופציות")
+        risk       = profile.get("risk_tolerance", "מתון")
+
+        knowledge_summary = ""
+        if knowledge_list:
+            topics = [k.get("topic", "") for k in knowledge_list[:10]]
+            knowledge_summary = f"\nידע שנלמד: {', '.join(topics)}"
+
+        insights_section = f"\nדפוסי שיחה: {insights}" if insights else ""
+
+        return (
+            "אתה HAI — סוכן מסחר AI אישי של חיים, מומחה באופציות על מניות אמריקאיות.\n"
+            "אתה לא בוט פשוט. אתה שותף מסחר אמיתי שמכיר את חיים לעומק.\n\n"
+            "═══════════════════════════════════\n"
+            "פרטי המשתמש — חיים\n"
+            "═══════════════════════════════════\n"
+            f"• סגנון: מוכר פרמיה, מתמקד באופציות\n"
+            f"• אסטרטגיות מועדפות: {strategies}\n"
+            f"• מניות במעקב: {watchlist}\n"
+            f"• ברוקר: Interactive Brokers Israel\n"
+            f"• ניסיון: מתקדם — מכיר IV, Greeks, DTE, Theta\n"
+            f"• מטרה: {goal}\n"
+            f"• רמת סיכון: {risk}"
+            f"{insights_section}"
+            f"{knowledge_summary}\n\n"
+            "═══════════════════════════════════\n"
+            "כיצד להתנהג\n"
+            "═══════════════════════════════════\n"
+            "1. ענה תמיד בעברית — שמור מונחים טכניים באנגלית (IV, DTE, Delta, Strike)\n"
+            "2. זכור — יש לך היסטוריית שיחות מלאה. אל תשאל שוב על דברים שנאמרו\n"
+            "3. היה יזם — אל תחכה שישאלו. אם רואה הזדמנות, ציין אותה\n"
+            "4. השתמש בנתונים אמיתיים — יש לך גישה לשוק דרך yfinance ו-Perplexity\n"
+            "5. היה ישיר — חיים מנוסה. אל תסביר בסיסים שהוא כבר יודע\n"
+            "6. אם משהו מסוכן — אמור זאת בבירור ומיידית\n"
+            "7. בסוף תשובות ארוכות — הצע פעולה ספציפית\n"
+            "8. אתה יכול לנתח תמונות, לקרוא PDFs, וללמוד מקישורים\n\n"
+            "═══════════════════════════════════\n"
+            "גישה לנתונים\n"
+            "═══════════════════════════════════\n"
+            "• מחירי שוק: yfinance | חדשות בזמן אמת: Perplexity\n"
+            "• IV ו-Greeks: options chain מ-yfinance\n"
+            "• ניתוח טכני: TradingView Screener\n"
+            "• היסטוריה: MongoDB (כל שיחה נשמרת)\n"
+            "• ידע נלמד: MongoDB (כל מה ששלחת ללמוד)\n\n"
+            "אל תגיד אף פעם:\n"
+            "❌ 'אין לי גישה לאינטרנט' — יש לך Perplexity\n"
+            "❌ 'אני לא זוכר' — יש לך היסטוריית שיחות\n"
+            "❌ 'אני לא יכול לנתח תמונות' — יש לך Claude Vision\n"
+            "❌ 'תפנה לאנליסט' — אתה האנליסט"
+        )
+
     # ── System prompt builder ─────────────────────────────────────────────────
 
     def build_system_prompt(self) -> str:
