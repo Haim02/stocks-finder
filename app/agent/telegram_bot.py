@@ -1516,87 +1516,74 @@ async def gex_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    msg = """🤖 *HAI — סוכן מסחר AI אישי*
-_מערכת Options Trading אוטונומית_
+    msg = """🤖 *HAI — סוכן מסחר AI*
 
-━━━━━━━━━━━━━━━━━━━━━━━━
-🧠 *סוכנים ומצב מערכת*
-• `/status` — מצב כל 3 הסוכנים + בריאות מערכת
-• `/regime` — ניתוח Regime יומי (Bullish/Bearish/Neutral)
-• `/strategist` — המלצות עסקאות לפי Regime + IV
-• `/riskcheck` — ניהול סיכונים: P/L, Delta, exposure
+━━━━━━━━━━━━━━━━━━━━━━
+🧠 *סוכנים*
+/status — מצב המערכת
+/regime — ניתוח שוק יומי
+/strategist — המלצות עסקאות
+/riskcheck — ניהול סיכונים
 
-━━━━━━━━━━━━━━━━━━━━━━━━
-📊 *סריקות Options*
-• `/scan TICKER` — Scanner מלא עם IV אמיתי (ברירת מחדל: SPY)
-• `/scan NVDA` — ניתוח מלא ל-NVDA
-• `/zerod` — 0DTE Analysis: SPX + SPY + QQQ
-• `/zerod TICKER` — 0DTE על מניה ספציפית
-• `/ivscan` — מניות עם IV Rank גבוה (הזדמנויות פרמיה)
-• `/csp TICKER` — Cash Secured Put Scanner
-• `/chainscreen TICKER` — Chain Screener: spread opportunities
-• `/spxsignal` — SPX 0DTE Signal: entry/exit בזמן אמת
+━━━━━━━━━━━━━━━━━━━━━━
+📊 *סריקות*
+/scan — Options Scanner
+/zerod — 0DTE Analysis
+/ivscan — IV גבוה
+/chainscreen — Chain Screener
+/gex — GEX + A/D Line
 
-━━━━━━━━━━━━━━━━━━━━━━━━
-📺 *TradingView Screener*
-• `/tvscan strong_buy` — מניות Strong Buy בכל ה-timeframes
-• `/tvscan oversold` — מניות Oversold (RSI<30)
-• `/tvscan overbought` — מניות Overbought (RSI>70)
-• `/tvscan breakout` — פריצות נפח גבוה
-• `/tvscan momentum` — Momentum חזק
+━━━━━━━━━━━━━━━━━━━━━━
+📺 *TradingView*
+/tvscan strong_buy
+/tvscan oversold
+/tvscan overbought
+/tvscan momentum
 
-━━━━━━━━━━━━━━━━━━━━━━━━
-🔬 *ניתוח מעמיק*
-• `/deepscan TICKER` — ניתוח AI מלא: TA + IV + Sentiment + ML
-• `/debate TICKER` — Bull vs Bear: 4 סוכנים מתווכחים
-• `/earningstraddle` — Earnings Straddle Scanner (11 פילטרים)
-• `/gex` — GEX Analysis + Gamma Levels + A/D Line
-• `/gex TICKER` — GEX ספציפי למניה
-• `/backtest TICKER STRATEGY` — Backtest היסטורי
-• `/internet שאלה` — חיפוש Perplexity בזמן אמת
+━━━━━━━━━━━━━━━━━━━━━━
+🔬 *ניתוח עמוק*
+/deepscan — ניתוח AI מלא
+/internet — חיפוש בזמן אמת
 
-━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━
 💼 *פוזיציות*
-• `/positions` — פוזיציות פתוחות + P/L
-• `/addposition` — הוסף פוזיציה חדשה
-• `/closeposition` — סגור פוזיציה
+/positions — פוזיציות פתוחות
+/addposition — הוסף פוזיציה
+/closeposition — סגור פוזיציה
 
-━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━
 🧠 *זיכרון ולמידה*
-• `/myprofile` — הפרופיל שלי: watchlist, העדפות, אסטרטגיות
-• `/memory` — 10 השיחות האחרונות
-• `/summary` — סיכום שבועי: ביצועים + תובנות + דפוסים
-• `/knowledge` — רשימת כל הידע שנלמד
-• `/learn_url URL` — למד מקישור (אתר, YouTube, GitHub, X/Twitter, PDF)
-• `/learn נושא | תוכן` — הוסף ידע ידני ישירות
-• `/settings` — הגדרות הסוכן: שפה, אסטרטגיה, risk level
-• `/reset` — נקה היסטוריית שיחה (הפרופיל נשמר)
+/myprofile — הפרופיל שלי
+/memory — היסטוריית שיחות
+/summary — סיכום שבועי
+/knowledge — ידע שנלמד
+/learn_url — למד מקישור
+/learn — הוסף ידע
+/settings — הגדרות
+/reset — נקה שיחה
 
-━━━━━━━━━━━━━━━━━━━━━━━━
-📰 *חדשות וניטור*
-• `/monitor` — סריקה ידנית מיידית של כל הwatchlist
-• `/briefing` — דוח בוקר: שוק + GEX + לוח אירועים
-• `/watchlist` — הצג/ערוך את רשימת המעקב שלך
-• `/watchlist add TICKER` — הוסף מניה למעקב
-• `/alerts` — היסטוריית התראות אחרונות
+━━━━━━━━━━━━━━━━━━━━━━
+📰 *ניטור*
+/monitor — סריקה ידנית
+/briefing — דוח בוקר
+/watchlist — מניות במעקב
+/alerts — התראות אחרונות
 
-━━━━━━━━━━━━━━━━━━━━━━━━
-🤖 *ML / XGBoost*
-• `/train` — אמן מחדש XGBoost (Fama-French features)
-• `/leaderboard` — Top 15 מניות לפי XGBoost Score
+━━━━━━━━━━━━━━━━━━━━━━
+🤖 *ML*
+/train — אמן XGBoost
+/leaderboard — Top 15
 
-━━━━━━━━━━━━━━━━━━━━━━━━
-📎 *שלח ישירות — ללא פקודה:*
-• 📷 תמונה/גרף → ניתוח Claude Vision (chart, options chain)
-• 📄 PDF → קריאה ולמידה אוטומטית
-• 💬 שאלה חופשית → תשובה עם זיכרון + context שוק
+━━━━━━━━━━━━━━━━━━━━━━
+📎 *שלח ישירות:*
+📷 תמונה → ניתוח גרף
+📄 PDF → קריאה ולמידה
+💬 שאלה → תשובה חכמה
 
-━━━━━━━━━━━━━━━━━━━━━━━━
-🔔 *אוטומטי — בלי לבקש:*
-🌅 `09:00` — דוח בוקר יומי בעברית
-⚡ `כל 15 דקות` — תנועות >3%, IV spikes, Earnings warnings
-🕷️ `כל 30 דקות` — SEC filings, Fed, Options flow חריג
-🌙 `23:30` — סיכום יום + אירועי מחר"""
+🔔 *אוטומטי:*
+🌅 09:00 דוח בוקר
+⚡ כל 15 דקות סריקה
+🌙 23:30 סיכום יום"""
 
     await update.message.reply_text(msg, parse_mode="Markdown")
 
@@ -2226,32 +2213,6 @@ async def chainscreen_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 
-async def spxsignal_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/spxsignal — SPX 0DTE straddle signal: buy or sell based on actual vs expected move."""
-    if not _is_authorized(update):
-        return
-    await update.message.reply_text("📊 מחשב SPX 0DTE Signal...")
-    try:
-        from app.services.ibkr_service import get_spx_0dte_signal
-        sig = await asyncio.to_thread(get_spx_0dte_signal)
-        action = {
-            "buy_straddle": "📈 קנה Straddle",
-            "sell_condor":  "📉 מכור Iron Condor",
-            "neutral":      "➡️ ניטרלי",
-        }.get(sig["signal"], "⚪")
-        msg = (
-            f"📊 *SPX 0DTE Signal*\n{'━' * 26}\n\n"
-            f"🎯 *{action}*\n\n"
-            f"📐 תנועה ממוצעת: `${sig.get('mean_actual', 0)}`\n"
-            f"📐 תנועה צפויה: `${sig.get('expected', 0)}`\n"
-            f"📊 יחס: `{sig.get('ratio', 1):.2f}x`\n\n"
-            f"💡 {sig.get('reason', '')}"
-        )
-        await update.message.reply_text(msg, parse_mode="Markdown")
-    except Exception as e:
-        logger.exception("spxsignal_command failed")
-        await update.message.reply_text(f"⚠️ שגיאה: {e}")
-
 
 async def ivscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/ivscan [TICKERS] [--min-rank N] — Scan for high IV stocks and explain why."""
@@ -2290,50 +2251,13 @@ async def ivscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 
-async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Run Bull Put Spread backtest via backtest_engine.py."""
-    if not _is_authorized(update):
-        return
-
-    args = context.args
-    if not args:
-        await update.message.reply_text(
-            "📝 שימוש: `/backtest TICKER`\nדוגמה: `/backtest AAPL`",
-            parse_mode="Markdown",
-        )
-        return
-
-    ticker = args[0].upper()
-    await update.message.reply_text(f"📊 מריץ Backtest על {ticker}... (כ-20 שניות)")
-
-    try:
-        from app.services.backtest_engine import (
-            backtest_bull_put_spread,
-            format_backtest_hebrew,
-        )
-        result = await asyncio.to_thread(lambda: backtest_bull_put_spread(ticker))
-        if result:
-            msg = format_backtest_hebrew(result)
-            try:
-                await update.message.reply_text(msg, parse_mode="Markdown")
-            except Exception:
-                await update.message.reply_text(msg)
-        else:
-            await update.message.reply_text(
-                f"⚠️ לא הצלחתי להריץ backtest על {ticker}.\n"
-                f"ייתכן שאין מספיק היסטוריה או אופציות זמינות."
-            )
-    except Exception as e:
-        logger.exception("backtest_command failed for %s", ticker)
-        await update.message.reply_text(f"⚠️ שגיאה: {e}")
-
 
 async def tvscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Scan stocks by TradingView signal type: /tvscan oversold"""
     if not _is_authorized(update):
         return
 
-    valid_signals = ["oversold", "overbought", "trending_up", "trending_down", "breakout", "strong_buy"]
+    valid_signals = ["oversold", "overbought", "trending_up", "trending_down", "strong_buy", "momentum"]
     signal = context.args[0].lower() if context.args else "oversold"
 
     if signal not in valid_signals:
@@ -2373,69 +2297,6 @@ async def tvscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 
-async def debate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Run Bull vs Bear debate on a ticker: /debate AAPL"""
-    if not _is_authorized(update):
-        return
-
-    ticker = context.args[0].upper() if context.args else ""
-    if not ticker:
-        await update.message.reply_text(
-            "📝 שימוש: `/debate AAPL`\n\n"
-            "מריץ דיון Bull vs Bear — 4 סוכנים מנתחים את המניה:\n"
-            "🐂 Bull Researcher → 🐻 Bear Researcher → ⚖️ Judge → 🛡️ Risk Manager\n\n"
-            "הדיון מבוסס על: IV Rank, מחיר, RSI, TA Score, חדשות Perplexity, Regime",
-            parse_mode="Markdown",
-        )
-        return
-
-    await update.message.reply_text(
-        f"⚔️ מתחיל Bull vs Bear Debate על *{ticker}*...\n"
-        f"4 סוכנים עובדים בסדרה (~25 שניות)",
-        parse_mode="Markdown",
-    )
-    try:
-        from app.services.bull_bear_debate import run_bull_bear_debate, format_debate_hebrew
-        result = await asyncio.to_thread(lambda: run_bull_bear_debate(ticker))
-        msg = format_debate_hebrew(result)
-        for chunk in _split_message_bot(msg):
-            try:
-                await update.message.reply_text(chunk, parse_mode="Markdown")
-            except Exception:
-                await update.message.reply_text(chunk)
-    except Exception as e:
-        logger.exception("debate_command failed for %s", ticker)
-        await update.message.reply_text(f"⚠️ שגיאה בדיון: {e}")
-
-
-async def earningstraddle_command(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    """Scan for Earnings Straddle opportunities."""
-    if not _is_authorized(update):
-        return
-    await update.message.reply_text(
-        "🎯 סורק Earnings Straddle...\n"
-        "מחפש מניות עם Earnings בעוד 3 ימים שעוברות את כל הסינונים\n"
-        "(כ-30 שניות)"
-    )
-    try:
-        from app.services.earnings_straddle_scanner import (
-            scan_earnings_straddle,
-            format_earnings_straddle_hebrew,
-        )
-        results = await asyncio.to_thread(
-            lambda: scan_earnings_straddle(days_ahead=3, max_results=5)
-        )
-        msg = format_earnings_straddle_hebrew(results)
-        for chunk in _split_message_bot(msg):
-            try:
-                await update.message.reply_text(chunk, parse_mode="Markdown")
-            except Exception:
-                await update.message.reply_text(chunk)
-    except Exception as e:
-        logger.exception("earningstraddle_command failed")
-        await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 
 async def internet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2480,47 +2341,6 @@ async def internet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         logger.exception("internet_command failed")
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
-
-async def csp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Scan for Cash Secured Put opportunities."""
-    if not _is_authorized(update):
-        return
-
-    args = context.args or []
-
-    # Parse: /csp [max_price] [tickers...]
-    max_price = 20.0
-    custom_tickers = None
-
-    if args:
-        try:
-            max_price = float(args[0])
-            custom_tickers = [a.upper() for a in args[1:]] or None
-        except ValueError:
-            custom_tickers = [a.upper() for a in args]
-
-    await update.message.reply_text(
-        f"🔍 סורק CSP — מניות עד ${max_price:.0f}...\n"
-        f"(בודק פרמיות, נזילות, מגמה — כ-30 שניות)"
-    )
-
-    try:
-        from app.services.csp_scanner import scan_csp_opportunities, format_csp_hebrew
-        results = await asyncio.to_thread(
-            lambda: scan_csp_opportunities(
-                max_price=max_price,
-                custom_tickers=custom_tickers,
-                max_results=6,
-            )
-        )
-        msg = format_csp_hebrew(results)
-        try:
-            await update.message.reply_text(msg, parse_mode="Markdown")
-        except Exception:
-            await update.message.reply_text(msg)
-    except Exception as e:
-        logger.exception("csp_command failed")
-        await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 
 async def deepscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2955,28 +2775,17 @@ def build_app() -> Application:
     # ── High IV Scanner ───────────────────────────────────────────────────────
     app.add_handler(CommandHandler("ivscan",       ivscan_command))
 
-    # ── Options Chain Screener + SPX Signal ───────────────────────────────────
+    # ── Options Chain Screener ────────────────────────────────────────────────
     app.add_handler(CommandHandler("chainscreen",  chainscreen_command))
-    app.add_handler(CommandHandler("spxsignal",    spxsignal_command))
 
-    # ── Backtest + Trade evaluation ────────────────────────────────────────────
-    app.add_handler(CommandHandler("backtest",     backtest_command))
+    # ── Trade evaluation ───────────────────────────────────────────────────────
     app.add_handler(CommandHandler("evaluate",     evaluate_command))
 
     # ── Deep Smart Scanner ────────────────────────────────────────────────────
     app.add_handler(CommandHandler("deepscan",     deepscan_command))
 
-    # ── Cash Secured Put Scanner ──────────────────────────────────────────────
-    app.add_handler(CommandHandler("csp",          csp_command))
-
     # ── Internet search (Perplexity) ──────────────────────────────────────────
     app.add_handler(CommandHandler("internet",     internet_command))
-
-    # ── Earnings Straddle Scanner ─────────────────────────────────────────────
-    app.add_handler(CommandHandler("earningstraddle", earningstraddle_command))
-
-    # ── Bull vs Bear Debate ───────────────────────────────────────────────────
-    app.add_handler(CommandHandler("debate",          debate_command))
 
     # ── TradingView Scanner ───────────────────────────────────────────────────
     app.add_handler(CommandHandler("tvscan",          tvscan_command))
