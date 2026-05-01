@@ -164,18 +164,19 @@ def _fetch_macro() -> tuple[str, float, float]:
 
 # ── Verdict logic ─────────────────────────────────────────────────────────────
 
-def _detect_perplexity_risks(research: PerplexityResearch) -> tuple[bool, str]:
+def _detect_perplexity_risks(research: PerplexityResearch) -> tuple[int, str]:
     """
     Scan Perplexity answers for high-risk keywords.
-    Returns (has_major_risk, risk_description).
+    Returns (risk_count, risk_description) — count of RED_KEYWORDS found.
+    Requires 2+ to trigger RED (single word can be noise).
     """
     if not research.has_data:
-        return False, ""
+        return 0, ""
 
-    RED_KEYWORDS = [
-        "recession", "crash", "collapse", "crisis", "default",
-        "emergency", "panic", "black swan", "war", "systemic",
-        "lehman", "bank run", "contagion",
+    RISK_WORDS = [
+        "recession", "crash", "crisis", "collapse", "panic", "selloff",
+        "default", "emergency", "black swan", "systemic", "lehman",
+        "bank run", "contagion",
     ]
     YELLOW_KEYWORDS = [
         "concern", "warning", "slowdown", "uncertainty", "tension",
@@ -184,15 +185,19 @@ def _detect_perplexity_risks(research: PerplexityResearch) -> tuple[bool, str]:
 
     all_text = " ".join(research.raw_responses.values()).lower()
 
-    for kw in RED_KEYWORDS:
-        if kw in all_text:
-            return True, f"Perplexity זיהה: '{kw}' בחדשות — סיכון גבוה"
+    risk_count = sum(1 for w in RISK_WORDS if w in all_text)
+    if risk_count >= 2:
+        hits = [w for w in RISK_WORDS if w in all_text]
+        return risk_count, f"Perplexity זיהה {risk_count} מילות סיכון: {', '.join(hits[:3])}"
+    elif risk_count == 1:
+        hit = next(w for w in RISK_WORDS if w in all_text)
+        return risk_count, f"Perplexity זיהה: '{hit}' — סיכון ברמה בינונית"
 
     yellow_hits = [kw for kw in YELLOW_KEYWORDS if kw in all_text]
     if len(yellow_hits) >= 2:
-        return False, f"Perplexity זיהה: {', '.join(yellow_hits[:3])}"
+        return 0, f"Perplexity זיהה: {', '.join(yellow_hits[:3])}"
 
-    return False, ""
+    return 0, ""
 
 
 def _calculate_verdict(
@@ -201,47 +206,88 @@ def _calculate_verdict(
     iv_rank: float,
     sentiment_avg: float,
     macro_regime: str,
-    perplexity_major_risk: bool = False,
-) -> str:
+    perplexity_risk_count: int = 0,
+) -> tuple[str, int, int]:
     """
-    RED conditions (any one is enough):
-      - VIX > 35 (extreme fear)
-      - macro_regime == "recession"
-      - VIX > 28 AND spy_trend == "bearish"
-      - Perplexity detected major risk keywords
+    Returns (verdict, red_signals, risk_count).
 
-    YELLOW conditions:
-      - VIX 22–35
-      - sentiment_avg < 4.0
-      - spy_trend == "bearish" alone
+    RED requires 2+ red signals — single indicators are not enough:
+      - VIX > 30
+      - perplexity_risk_count >= 2
+      - spy_trend == "bearish"
+      - yield_curve < -0.5
 
-    GREEN: everything else
+    YELLOW: single risk signal or VIX 25–30.
+    GREEN: everything else.
     """
-    # RED
-    if perplexity_major_risk:
-        return "RED"
-    if vix > 35:
-        return "RED"
+    yield_curve = (
+        _last_macro_snapshot.yield_curve
+        if _last_macro_snapshot else 0.0
+    )
+    recession_prob = (
+        _last_macro_snapshot.recession_probability
+        if _last_macro_snapshot else 0.0
+    )
+
+    verdict = "GREEN"
+
+    # FIX 2 — VIX thresholds (loosened from 20/28 → 25/30)
+    if vix > 30:
+        verdict = "RED"
+    elif vix > 25:
+        if verdict == "GREEN":
+            verdict = "YELLOW"
+
+    # Macro recession label
     if macro_regime and "recession" in macro_regime.lower():
-        return "RED"
-    if vix > 28 and spy_trend == "bearish":
-        return "RED"
-    # FRED: inverted yield curve (recession signal)
-    if _last_macro_snapshot and _last_macro_snapshot.yield_curve < -0.5:
-        return "RED"
-    # FRED: high recession probability
-    if _last_macro_snapshot and _last_macro_snapshot.recession_probability > 50:
-        return "RED"
+        verdict = "RED"
 
-    # YELLOW
-    if vix > 22:
-        return "YELLOW"
-    if sentiment_avg < 4.0:
-        return "YELLOW"
+    # FIX 1 — risk words need count ≥ 2 for RED; 1 word → only YELLOW
+    risk_count = perplexity_risk_count
+    if risk_count >= 2:
+        verdict = "RED"
+    elif risk_count == 1:
+        if verdict == "GREEN":
+            verdict = "YELLOW"
+
+    # FRED signals
+    if yield_curve < -0.5:
+        verdict = "RED"
+    if recession_prob > 50:
+        verdict = "RED"
+
+    # YELLOW conditions
+    if verdict == "GREEN":
+        if sentiment_avg < 4.0:
+            verdict = "YELLOW"
+        if spy_trend == "bearish":
+            verdict = "YELLOW"
+
+    # FIX 3 — count red signals; require 2+ to keep RED
+    red_signals = 0
+    if vix > 28:
+        red_signals += 1
+    if risk_count >= 2:
+        red_signals += 1
     if spy_trend == "bearish":
-        return "YELLOW"
+        red_signals += 1
+    if yield_curve < -0.5:
+        red_signals += 1
 
-    return "GREEN"
+    if verdict == "RED" and red_signals < 2:
+        verdict = "YELLOW"
+        logger.info(
+            "Verdict downgraded RED→YELLOW — only %d red signal(s) (need 2+)",
+            red_signals,
+        )
+
+    logger.info(
+        "Verdict: %s | VIX=%.1f | risk_words=%d | spy=%s | "
+        "yield_curve=%.2f | red_signals=%d",
+        verdict, vix, risk_count, spy_trend, yield_curve, red_signals,
+    )
+
+    return verdict, red_signals, risk_count
 
 
 # ── Hebrew summary builder ────────────────────────────────────────────────────
@@ -388,14 +434,19 @@ def _build_hebrew_summary(report: MarketRegimeReport) -> str:
             clean = str(note).strip()[:120]
             perp_section += f"• {clean}\n"
 
-    # Reason for RED / YELLOW
+    # Reason for RED / YELLOW — FIX 4: detailed breakdown for RED
+    raw = getattr(report, 'raw', {}) or {}
+    red_signals = raw.get("red_signals", 0)
+    risk_count  = raw.get("risk_count", 0)
     reason_section = ""
     if verdict == "RED":
         reason_section = (
-            "\n\n⛔ *למה אדום?*\n"
-            "הסוכן זיהה סיכון בחדשות או בנתוני מאקרו. "
-            "Agent 2 לא יריץ המלצות עסקאות היום. "
-            "מחר הסוכן יבדוק שוב."
+            f"\n\n⛔ *למה אדום?*\n"
+            f"• VIX: `{vix:.1f}` {'🔴 גבוה מאוד' if vix > 30 else '🟡 מוגבר' if vix > 25 else '✅ תקין'}\n"
+            f"• מילות סיכון בחדשות: `{risk_count}`\n"
+            f"• SPY: `{spy_trend}`\n"
+            f"• סיגנלים אדומים: `{red_signals}/4` (נדרש 2+)\n\n"
+            f"Agent 2 לא יריץ המלצות עסקאות היום. מחר הסוכן יבדוק שוב."
         )
     elif verdict == "YELLOW":
         reason_section = (
@@ -470,19 +521,18 @@ class MarketRegimeAgent:
         # 2. Run Perplexity morning research
         perplexity_svc = PerplexityService()
         research = perplexity_svc.run_morning_research()
-        perplexity_major_risk, perplexity_risk_desc = _detect_perplexity_risks(research)
+        perplexity_risk_count, perplexity_risk_desc = _detect_perplexity_risks(research)
 
         if research.has_data:
-            logger.info("Perplexity research complete — major_risk=%s", perplexity_major_risk)
+            logger.info("Perplexity research complete — risk_count=%d", perplexity_risk_count)
         else:
             logger.info("Perplexity not available — skipping research layer")
 
-        # 3. Calculate verdict
-        verdict = _calculate_verdict(
+        # 3. Calculate verdict (returns verdict + red_signals + risk_count)
+        verdict, red_signals, risk_count = _calculate_verdict(
             vix, spy_trend, iv_rank, sentiment_avg, macro_regime,
-            perplexity_major_risk=perplexity_major_risk,
+            perplexity_risk_count=perplexity_risk_count,
         )
-        logger.info("Verdict: %s", verdict)
 
         # 3b. GEX analysis — can downgrade GREEN to YELLOW
         gex_text = ""
@@ -561,6 +611,8 @@ class MarketRegimeAgent:
                 "gex": gex_text,
                 "ad_line": ad_text,
                 "ff_regime": ff_text,
+                "red_signals": red_signals,
+                "risk_count": risk_count,
             },
         )
         report.summary_hebrew = _build_hebrew_summary(report)
