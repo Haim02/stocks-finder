@@ -46,19 +46,19 @@ logger = logging.getLogger(__name__)
 
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle all free text messages, photos, and documents via TradingAgent."""
+    """Handle free text messages via TradingAgent (photos/docs have dedicated handlers)."""
     if not _is_authorized(update):
         return
 
-    user_text = (update.message.text or update.message.caption or "").strip()
-    if not user_text and not update.message.photo and not update.message.document:
+    user_text = (update.message.text or "").strip()
+    if not user_text:
         return
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
     agent = get_agent()
 
-    # Handle /learn inside free chat
+    # /learn and /learn_url typed as free text (not command)
     if user_text.lower().startswith("/learn"):
         reply = await agent.handle_learn(user_text)
         try:
@@ -67,41 +67,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await update.message.reply_text(reply)
         return
 
-    # Image attachment
-    image_data = None
-    image_mime = None
-    if update.message.photo:
-        import io
-        photo = update.message.photo[-1]
-        file = await context.bot.get_file(photo.file_id)
-        buf = io.BytesIO()
-        await file.download_to_memory(buf)
-        image_data = buf.getvalue()
-        image_mime = "image/jpeg"
-
-    # Document attachment
-    document_text = None
-    if update.message.document:
-        import io
-        doc = update.message.document
-        if doc.mime_type in ("text/plain",) or (doc.file_name or "").endswith((".txt", ".pdf")):
-            try:
-                file = await context.bot.get_file(doc.file_id)
-                buf = io.BytesIO()
-                await file.download_to_memory(buf)
-                document_text = buf.getvalue().decode("utf-8", errors="ignore")[:3000]
-            except Exception:
-                pass
-
-    if not user_text:
-        user_text = "שלחתי קובץ / תמונה — אנא נתח אותו."
-
-    reply = await agent.handle_message(
-        text=user_text,
-        image_data=image_data,
-        image_mime=image_mime,
-        document_text=document_text,
-    )
+    reply = await agent.handle_message(text=user_text)
 
     for chunk in split_message(reply):
         try:
@@ -1612,10 +1578,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 🧠 *זיכרון ולמידה*
 - /myprofile — הפרופיל שלי (watchlist, אסטרטגיות, ידע)
 - /memory — 5 ההודעות האחרונות
-- /learn_url URL — למד מקישור ושמור לזיכרון
-- /learn <טקסט> — הוסף ידע לזיכרון
+- /knowledge — רשימת כל הידע שצברת
+- /learn נושא | תוכן — הוסף ידע ישירות
+- /learn_url URL — למד מקישור (אתר, YouTube, GitHub, X)
 - /reset — נקה היסטוריית שיחה (פרופיל נשמר)
 - /help — הרשימה הזו
+
+📎 *שלח קובץ PDF* — אקרא ואלמד ממנו
+🖼️ *שלח תמונה/גרף* — אנתח ואזכור (Claude Vision)
 
 ━━━━━━━━━━━━━━━━━━━━━━
 💬 *Free Chat — פשוט תשאל:*
@@ -1669,20 +1639,206 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def learn_url_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/learn_url <URL> — Fetch URL and save to knowledge base."""
+    """/learn_url <URL> — Learn from any URL (webpage, YouTube, GitHub, X/Twitter, PDF)."""
     if not _is_authorized(update):
         return
     if not context.args:
         await update.message.reply_text(
-            "📝 שימוש: `/learn_url https://example.com`",
+            "📝 שימוש: `/learn_url URL`\n\n"
+            "עובד עם:\n"
+            "• אתרים רגילים\n"
+            "• YouTube\n"
+            "• GitHub repos\n"
+            "• X/Twitter threads\n"
+            "• קישורי PDF",
             parse_mode="Markdown"
         )
         return
+
     url = context.args[0]
-    await update.message.reply_text(f"📖 קורא את הקישור... {url}")
-    agent = get_agent()
-    result = await agent.learn_from_url(url)
-    await update.message.reply_text(result)
+    await update.message.reply_text(f"📖 קורא ולומד מ: `{url}`...", parse_mode="Markdown")
+
+    try:
+        from app.services.learning_engine import LearningEngine
+        result = await asyncio.to_thread(LearningEngine().learn_from_url, url)
+
+        if result["success"]:
+            try:
+                await update.message.reply_text(
+                    f"✅ *למדתי!*\n\n"
+                    f"📌 נושא: `{result['topic']}`\n"
+                    f"💾 נשמר: `{result['chars_saved']}` תווים\n\n"
+                    f"📋 *תקציר:*\n{result['summary']}\n\n"
+                    f"מעכשיו אשתמש במידע הזה בשיחות שלנו.",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                await update.message.reply_text(f"✅ למדתי! נושא: {result['topic']}")
+        else:
+            await update.message.reply_text(f"⚠️ שגיאה: {result['error']}")
+
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
+async def learn_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/learn [topic |] content — Learn from direct text input."""
+    if not _is_authorized(update):
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "📝 שימוש: `/learn נושא | תוכן`\n\n"
+            "דוגמה:\n"
+            "`/learn Iron Condor | אסטרטגיה לשמירת פרמיה — מוכרים Call וPut OTM...`",
+            parse_mode="Markdown"
+        )
+        return
+
+    from datetime import datetime as _dt
+    full_text = " ".join(context.args)
+    if "|" in full_text:
+        parts = full_text.split("|", 1)
+        topic = parts[0].strip()
+        content = parts[1].strip()
+    else:
+        topic = f"ידע {_dt.now().strftime('%d/%m %H:%M')}"
+        content = full_text
+
+    try:
+        from app.services.learning_engine import LearningEngine
+        result = await asyncio.to_thread(LearningEngine().learn_from_text, topic, content)
+
+        if result["success"]:
+            await update.message.reply_text(
+                f"✅ שמרתי!\n📌 נושא: `{topic}`\n💾 {result['chars_saved']} תווים",
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text(f"⚠️ שגיאה: {result['error']}")
+
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
+async def knowledge_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/knowledge — List all learned knowledge."""
+    if not _is_authorized(update):
+        return
+    try:
+        from app.services.learning_engine import LearningEngine
+        knowledge = LearningEngine().list_knowledge()
+
+        if not knowledge:
+            await update.message.reply_text(
+                "📭 עדיין לא למדתי שום דבר חדש.\n"
+                "שלח `/learn_url URL` כדי שאלמד מקישור."
+            )
+            return
+
+        lines = [f"🧠 *הידע שצברתי ({len(knowledge)} נושאים):*\n"]
+        for i, k in enumerate(knowledge[:15], 1):
+            topic = k.get("topic", "")
+            ts = k.get("updated_at", k.get("learned_at", ""))
+            ts_str = ts.strftime("%d/%m") if hasattr(ts, "strftime") else str(ts)[:10]
+            lines.append(f"{i}. `{topic}` — {ts_str}")
+
+        try:
+            await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text("\n".join(lines))
+
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
+async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle photos — analyze with Claude Vision and save insights."""
+    if not _is_authorized(update):
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+    caption = update.message.caption or ""
+
+    import io
+    photo = update.message.photo[-1]
+    file = await context.bot.get_file(photo.file_id)
+    buf = io.BytesIO()
+    await file.download_to_memory(buf)
+    image_bytes = buf.getvalue()
+
+    try:
+        from app.services.learning_engine import LearningEngine
+        result = await asyncio.to_thread(
+            LearningEngine().learn_from_image, image_bytes, "image/jpeg", caption
+        )
+
+        if result["success"]:
+            saved_note = "\n\n✅ *נשמר לזיכרון*" if result.get("saved_to_memory") else ""
+            try:
+                await update.message.reply_text(
+                    f"🖼️ *ניתוח תמונה:*\n\n{result['analysis']}{saved_note}",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                await update.message.reply_text(result["analysis"])
+        else:
+            await update.message.reply_text(f"⚠️ שגיאה בניתוח: {result['error']}")
+
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
+async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle documents (PDF, TXT) — extract and learn."""
+    if not _is_authorized(update):
+        return
+    doc = update.message.document
+    if not doc:
+        return
+
+    await update.message.reply_text(
+        f"📄 קורא את הקובץ: `{doc.file_name}`...", parse_mode="Markdown"
+    )
+
+    try:
+        import io
+        file = await context.bot.get_file(doc.file_id)
+        buf = io.BytesIO()
+        await file.download_to_memory(buf)
+        file_bytes = buf.getvalue()
+
+        from app.services.learning_engine import LearningEngine
+        engine = LearningEngine()
+
+        if doc.mime_type == "application/pdf" or (doc.file_name or "").endswith(".pdf"):
+            result = await asyncio.to_thread(
+                engine.learn_from_pdf_bytes, file_bytes, doc.file_name or "PDF"
+            )
+        else:
+            text = file_bytes.decode("utf-8", errors="ignore")
+            result = await asyncio.to_thread(
+                engine.learn_from_text, doc.file_name or "Document", text
+            )
+
+        if result["success"]:
+            try:
+                await update.message.reply_text(
+                    f"✅ *למדתי מהקובץ!*\n\n"
+                    f"📌 נושא: `{result['topic']}`\n"
+                    f"💾 נשמר: `{result['chars_saved']}` תווים\n\n"
+                    f"📋 *תקציר:*\n{result.get('summary', '')[:400]}\n\n"
+                    f"מעכשיו אשתמש במידע הזה בשיחות.",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                await update.message.reply_text(
+                    f"✅ למדתי מהקובץ: {result['topic']}"
+                )
+        else:
+            await update.message.reply_text(f"⚠️ שגיאה: {result['error']}")
+
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 
 async def myprofile_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2740,7 +2896,9 @@ def build_app() -> Application:
 
     # ── Memory & learning commands ────────────────────────────────────────────
     app.add_handler(CommandHandler("reset",           reset_command))
+    app.add_handler(CommandHandler("learn",           learn_command))
     app.add_handler(CommandHandler("learn_url",       learn_url_command))
+    app.add_handler(CommandHandler("knowledge",       knowledge_command))
     app.add_handler(CommandHandler("myprofile",       myprofile_command))
     app.add_handler(CommandHandler("memory",          memory_command))
 
@@ -2750,8 +2908,8 @@ def build_app() -> Application:
 
     # ── Free chat — MUST be registered LAST so it doesn't shadow /commands ────
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    app.add_handler(MessageHandler(filters.PHOTO, message_handler))
-    app.add_handler(MessageHandler(filters.Document.ALL, message_handler))
+    app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+    app.add_handler(MessageHandler(filters.Document.ALL, document_handler))
     _app = app
     return app
 

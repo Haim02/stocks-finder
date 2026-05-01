@@ -375,8 +375,29 @@ class TradingAgent:
             for k in knowledge:
                 parts.append(f"[ידע שנלמד — {k.get('topic', '')}]\n{k.get('content', '')[:500]}")
 
+        # URL detection — learn or fetch for context
+        urls = re.findall(r'https?://[^\s]+', text)
+        learn_keywords = ["תלמד", "learn", "קרא", "read", "שמור", "save", "למד"]
+        for url in urls[:2]:
+            if any(w in text.lower() for w in learn_keywords):
+                try:
+                    from app.services.learning_engine import LearningEngine
+                    result = LearningEngine().learn_from_url(url)
+                    if result.get("success"):
+                        parts.append(
+                            f"[למדתי מהקישור: {url}]\n"
+                            f"נושא: {result['topic']}\n"
+                            f"{result['summary']}"
+                        )
+                except Exception:
+                    pass
+            else:
+                content = self._fetch_url_content(url)
+                if content:
+                    parts.append(f"[תוכן מהקישור: {url}]\n{content[:1000]}")
+
         # Generic internet search fallback
-        if not tickers and "general" not in intents:
+        if not tickers and "general" not in intents and not urls:
             internet = self._fetch_internet(text[:200])
             if internet:
                 parts.append(f"[אינטרנט]\n{internet}")
