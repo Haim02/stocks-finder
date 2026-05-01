@@ -289,12 +289,190 @@ class TradingAgent:
         b64 = base64.standard_b64encode(image_data).decode("utf-8")
         return [{"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": b64}}]
 
+    # ── Live Data Fetcher ────────────────────────────────────────────────────
+
+    def _fetch_live_data_for_query(self, text: str, tickers: list[str]) -> str:
+        """
+        Intelligently fetch real-time data based on what the user asked.
+        This is the core of the agent's ability to 'know' current data.
+        """
+        import yfinance as yf
+        from datetime import date
+        parts = []
+        text_lower = text.lower()
+
+        # ── 1. SPX/SPY current price ──────────────────────────────────────────
+        if any(w in text_lower for w in ["spx", "spy", "s&p", "מדד", "איפה עומד"]):
+            try:
+                spy = yf.Ticker("SPY")
+                hist = spy.history(period="2d")
+                if not hist.empty:
+                    price = float(hist["Close"].iloc[-1])
+                    prev = float(hist["Close"].iloc[-2])
+                    change = (price / prev - 1) * 100
+                    emoji = "📈" if change >= 0 else "📉"
+                    parts.append(
+                        f"[SPY/SPX עכשיו]\n"
+                        f"{emoji} SPY: ${price:.2f} ({change:+.2f}%)\n"
+                        f"SPX ≈ ${price * 10:.0f} (SPY × 10)"
+                    )
+            except Exception as e:
+                parts.append(f"[SPY] שגיאה: {e}")
+
+        # ── 2. Options Chain for specific tickers ─────────────────────────────
+        if any(w in text_lower for w in [
+            "strike", "options chain", "chain", "puts", "calls",
+            "אופציות", "שביתה", "ספציפי"
+        ]):
+            symbols = tickers if tickers else ["SPY"]
+            for symbol in symbols[:2]:
+                try:
+                    stock = yf.Ticker(symbol)
+                    price = float(stock.history(period="1d")["Close"].iloc[-1])
+                    expirations = stock.options
+
+                    if not expirations:
+                        continue
+
+                    # Get nearest expiration with 25-45 DTE
+                    today = date.today()
+                    target_exp = None
+                    for exp in expirations:
+                        from datetime import date as d
+                        exp_date = d.fromisoformat(exp)
+                        dte = (exp_date - today).days
+                        if 15 <= dte <= 50:
+                            target_exp = exp
+                            break
+
+                    if not target_exp:
+                        target_exp = expirations[0]
+
+                    chain = stock.option_chain(target_exp)
+                    exp_date = date.fromisoformat(target_exp)
+                    dte = (exp_date - today).days
+
+                    # Get ATM puts (for Bull Put Spread)
+                    puts = chain.puts
+                    puts_near = puts[
+                        (puts["strike"] >= price * 0.85) &
+                        (puts["strike"] <= price * 1.0) &
+                        (puts["bid"] > 0.05)
+                    ].sort_values("strike", ascending=False).head(6)
+
+                    # Get ATM calls (for Bear Call Spread)
+                    calls = chain.calls
+                    calls_near = calls[
+                        (calls["strike"] >= price * 1.0) &
+                        (calls["strike"] <= price * 1.15) &
+                        (calls["bid"] > 0.05)
+                    ].sort_values("strike").head(6)
+
+                    puts_text = "\n".join([
+                        f"  Put ${row['strike']:.0f} | Bid: ${row['bid']:.2f} "
+                        f"| Ask: ${row['ask']:.2f} "
+                        f"| OI: {int(row.get('openInterest', 0) or 0):,}"
+                        for _, row in puts_near.iterrows()
+                    ])
+
+                    calls_text = "\n".join([
+                        f"  Call ${row['strike']:.0f} | Bid: ${row['bid']:.2f} "
+                        f"| Ask: ${row['ask']:.2f} "
+                        f"| OI: {int(row.get('openInterest', 0) or 0):,}"
+                        for _, row in calls_near.iterrows()
+                    ])
+
+                    parts.append(
+                        f"[Options Chain — {symbol}]\n"
+                        f"מחיר: ${price:.2f} | פקיעה: {target_exp} ({dte} DTE)\n\n"
+                        f"📉 Puts (לBull Put Spread):\n{puts_text}\n\n"
+                        f"📈 Calls (לBear Call Spread):\n{calls_text}"
+                    )
+
+                except Exception as e:
+                    parts.append(f"[Options Chain {symbol}] שגיאה: {e}")
+
+        # ── 3. GDP / Economic data reaction ──────────────────────────────────
+        if any(w in text_lower for w in [
+            "gdp", 'תמ"ג', "nfp", "cpi", "jobs",
+            "economic", "כלכלי", "אינפלציה", "תגובת השוק"
+        ]):
+            news = self._fetch_internet(
+                f"What is the stock market reaction to the latest GDP or "
+                f"economic data today {date.today().strftime('%B %d %Y')}? "
+                f"SPY price change, sector reactions, Fed implications.",
+            )
+            if news:
+                parts.append(f"[תגובת שוק לנתונים כלכליים]\n{news}")
+
+        # ── 4. VIX current ───────────────────────────────────────────────────
+        if any(w in text_lower for w in ["vix", "תנודתיות", "פחד"]):
+            try:
+                vix = yf.Ticker("^VIX")
+                hist = vix.history(period="2d")
+                if not hist.empty:
+                    v = float(hist["Close"].iloc[-1])
+                    prev = float(hist["Close"].iloc[-2])
+                    chg = (v / prev - 1) * 100
+                    regime = (
+                        "🟢 שוק רגוע" if v < 15 else
+                        "✅ נורמלי" if v < 20 else
+                        "⚠️ מוגבר" if v < 25 else
+                        "🔴 גבוה"
+                    )
+                    parts.append(
+                        f"[VIX עכשיו]\n"
+                        f"VIX: {v:.2f} ({chg:+.1f}%) — {regime}"
+                    )
+            except Exception:
+                pass
+
+        # ── 5. Specific ticker price + basic info ────────────────────────────
+        for ticker in tickers[:3]:
+            try:
+                stock = yf.Ticker(ticker)
+                hist = stock.history(period="2d")
+                if hist.empty:
+                    continue
+                price = float(hist["Close"].iloc[-1])
+                prev = float(hist["Close"].iloc[-2])
+                chg = (price / prev - 1) * 100
+                emoji = "📈" if chg >= 0 else "📉"
+
+                vol = int(hist["Volume"].iloc[-1])
+                avg_vol = int(hist["Volume"].mean())
+                vol_ratio = vol / avg_vol if avg_vol > 0 else 1
+
+                parts.append(
+                    f"[{ticker} — נתון חי]\n"
+                    f"{emoji} מחיר: ${price:.2f} ({chg:+.2f}%)\n"
+                    f"Volume: {vol:,} ({vol_ratio:.1f}x ממוצע)"
+                )
+            except Exception:
+                pass
+
+        # ── 6. General news search if nothing specific found ─────────────────
+        if not parts and (tickers or len(text) > 20):
+            query = text[:200]
+            if tickers:
+                query = f"{' '.join(tickers)} — {text[:150]}"
+            news = self._fetch_internet(query)
+            if news:
+                parts.append(f"[נתוני אינטרנט]\n{news}")
+
+        return "\n\n".join(parts)
+
     # ── Context Builder ──────────────────────────────────────────────────────
 
     def _build_context(self, text: str, tickers: list[str], intents: list[str]) -> str:
         """Build rich context from market data + internet based on intent."""
         parts = []
         text_lower = text.lower()
+
+        # ── LIVE DATA FETCH (most important — goes first) ─────────────────────
+        live_data = self._fetch_live_data_for_query(text, tickers)
+        if live_data:
+            parts.insert(0, live_data)
 
         # Market regime (always useful)
         regime = self._fetch_market_regime()
@@ -401,6 +579,16 @@ class TradingAgent:
             internet = self._fetch_internet(text[:200])
             if internet:
                 parts.append(f"[אינטרנט]\n{internet}")
+
+        # Always search internet when tickers are mentioned and live data didn't cover it
+        if tickers and not live_data:
+            for ticker in tickers[:2]:
+                internet = self._fetch_internet(
+                    f"Current {ticker} stock price, news, and options activity today",
+                    ticker,
+                )
+                if internet:
+                    parts.append(f"[{ticker} — אינטרנט]\n{internet}")
 
         return "\n\n---\n\n".join(parts)
 
