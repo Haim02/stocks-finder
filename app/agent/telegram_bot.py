@@ -1517,71 +1517,86 @@ async def gex_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = """🤖 *HAI — סוכן מסחר AI אישי*
+_מערכת Options Trading אוטונומית_
 
-━━━━━━━━━━━━━━━━━━━━━━
-🧠 *סוכנים*
-• /status — מצב כל 3 הסוכנים
-• /regime — ניתוח שוק יומי
-• /strategist — המלצות עסקאות
-• /riskcheck — ניהול סיכונים
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧠 *סוכנים ומצב מערכת*
+• `/status` — מצב כל 3 הסוכנים + בריאות מערכת
+• `/regime` — ניתוח Regime יומי (Bullish/Bearish/Neutral)
+• `/strategist` — המלצות עסקאות לפי Regime + IV
+• `/riskcheck` — ניהול סיכונים: P/L, Delta, exposure
 
-━━━━━━━━━━━━━━━━━━━━━━
-📊 *סריקות*
-• /scan — Options Scanner (IV אמיתי)
-• /zerod — 0DTE Analysis
-• /ivscan — מניות IV גבוה
-• /tvscan oversold — TradingView scan
-• /csp — Cash Secured Put Scanner
-• /deepscan — ניתוח עמוק AI
-• /debate TICKER — Bull vs Bear
-• /earningstraddle — Earnings Straddle
-• /gex — GEX Analysis + A/D Line
-• /chainscreen TICKER — Chain Screener
-• /spxsignal — SPX 0DTE Signal
-• /backtest TICKER — Backtest היסטורי
-• /internet שאלה — חיפוש ישיר Perplexity
+━━━━━━━━━━━━━━━━━━━━━━━━
+📊 *סריקות Options*
+• `/scan TICKER` — Scanner מלא עם IV אמיתי (ברירת מחדל: SPY)
+• `/scan NVDA` — ניתוח מלא ל-NVDA
+• `/zerod` — 0DTE Analysis: SPX + SPY + QQQ
+• `/zerod TICKER` — 0DTE על מניה ספציפית
+• `/ivscan` — מניות עם IV Rank גבוה (הזדמנויות פרמיה)
+• `/csp TICKER` — Cash Secured Put Scanner
+• `/chainscreen TICKER` — Chain Screener: spread opportunities
+• `/spxsignal` — SPX 0DTE Signal: entry/exit בזמן אמת
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━
+📺 *TradingView Screener*
+• `/tvscan strong_buy` — מניות Strong Buy בכל ה-timeframes
+• `/tvscan oversold` — מניות Oversold (RSI<30)
+• `/tvscan overbought` — מניות Overbought (RSI>70)
+• `/tvscan breakout` — פריצות נפח גבוה
+• `/tvscan momentum` — Momentum חזק
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🔬 *ניתוח מעמיק*
+• `/deepscan TICKER` — ניתוח AI מלא: TA + IV + Sentiment + ML
+• `/debate TICKER` — Bull vs Bear: 4 סוכנים מתווכחים
+• `/earningstraddle` — Earnings Straddle Scanner (11 פילטרים)
+• `/gex` — GEX Analysis + Gamma Levels + A/D Line
+• `/gex TICKER` — GEX ספציפי למניה
+• `/backtest TICKER STRATEGY` — Backtest היסטורי
+• `/internet שאלה` — חיפוש Perplexity בזמן אמת
+
+━━━━━━━━━━━━━━━━━━━━━━━━
 💼 *פוזיציות*
-• /positions — פוזיציות פתוחות
-• /addposition — הוסף פוזיציה
-• /closeposition — סגור פוזיציה
+• `/positions` — פוזיציות פתוחות + P/L
+• `/addposition` — הוסף פוזיציה חדשה
+• `/closeposition` — סגור פוזיציה
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━
 🧠 *זיכרון ולמידה*
-• /myprofile — הפרופיל שלי
-• /memory — היסטוריית שיחות
-• /summary — סיכום שבועי + תובנות
-• /knowledge — ידע שנלמד
-• /learn_url URL — למד מקישור (אתר, YouTube, GitHub, X)
-• /learn נושא | תוכן — הוסף ידע
-• /settings — הגדרות הסוכן
-• /reset — נקה שיחה
+• `/myprofile` — הפרופיל שלי: watchlist, העדפות, אסטרטגיות
+• `/memory` — 10 השיחות האחרונות
+• `/summary` — סיכום שבועי: ביצועים + תובנות + דפוסים
+• `/knowledge` — רשימת כל הידע שנלמד
+• `/learn_url URL` — למד מקישור (אתר, YouTube, GitHub, X/Twitter, PDF)
+• `/learn נושא | תוכן` — הוסף ידע ידני ישירות
+• `/settings` — הגדרות הסוכן: שפה, אסטרטגיה, risk level
+• `/reset` — נקה היסטוריית שיחה (הפרופיל נשמר)
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━
 📰 *חדשות וניטור*
-• /monitor — סריקה ידנית
-• /briefing — דוח בוקר
-• /watchlist — ניהול מעקב
-• /alerts — היסטוריית התראות
+• `/monitor` — סריקה ידנית מיידית של כל הwatchlist
+• `/briefing` — דוח בוקר: שוק + GEX + לוח אירועים
+• `/watchlist` — הצג/ערוך את רשימת המעקב שלך
+• `/watchlist add TICKER` — הוסף מניה למעקב
+• `/alerts` — היסטוריית התראות אחרונות
 
-━━━━━━━━━━━━━━━━━━━━━━
-🤖 *ML*
-• /train — אימון XGBoost
-• /leaderboard — Top 15 מניות
+━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 *ML / XGBoost*
+• `/train` — אמן מחדש XGBoost (Fama-French features)
+• `/leaderboard` — Top 15 מניות לפי XGBoost Score
 
-━━━━━━━━━━━━━━━━━━━━━━
-📎 *שלח ישירות:*
-• תמונה/גרף → ניתוח Claude Vision
-• PDF → קריאה ולמידה אוטומטית
-• שאלה חופשית → תשובה חכמה עם זיכרון
+━━━━━━━━━━━━━━━━━━━━━━━━
+📎 *שלח ישירות — ללא פקודה:*
+• 📷 תמונה/גרף → ניתוח Claude Vision (chart, options chain)
+• 📄 PDF → קריאה ולמידה אוטומטית
+• 💬 שאלה חופשית → תשובה עם זיכרון + context שוק
 
-━━━━━━━━━━━━━━━━━━━━━━
-🔔 *אוטומטי (בלי לבקש):*
-🌅 09:00 דוח בוקר יומי
-⚡ כל 15 דקות — סריקת שוק + התראות
-🕷️ כל 30 דקות — SEC, Fed, Options Flow
-🌙 23:30 סיכום יום + מחר"""
+━━━━━━━━━━━━━━━━━━━━━━━━
+🔔 *אוטומטי — בלי לבקש:*
+🌅 `09:00` — דוח בוקר יומי בעברית
+⚡ `כל 15 דקות` — תנועות >3%, IV spikes, Earnings warnings
+🕷️ `כל 30 דקות` — SEC filings, Fed, Options flow חריג
+🌙 `23:30` — סיכום יום + אירועי מחר"""
 
     await update.message.reply_text(msg, parse_mode="Markdown")
 

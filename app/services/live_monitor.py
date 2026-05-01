@@ -92,6 +92,36 @@ def _get_watchlist() -> list[str]:
         return ["NVDA", "AAPL", "TSLA", "AMZN", "SPY", "QQQ", "META", "PLTR"]
 
 
+def _translate_to_hebrew(text: str) -> str:
+    """Translate English Perplexity output to Hebrew. Skips if already >30% Hebrew."""
+    if not text or len(text) < 20:
+        return text
+    hebrew_chars = sum(1 for c in text if "א" <= c <= "ת")
+    if hebrew_chars / max(len(text), 1) > 0.30:
+        return text
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return text
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            messages=[{
+                "role": "user",
+                "content": (
+                    "תרגם את הטקסט הבא לעברית. שמור מונחים פיננסיים באנגלית "
+                    "(שמות חברות, ticker, IV, CPI, FOMC, Fed, SPY, NFP וכו'). "
+                    "תרגם בלבד, אל תוסיף הסברים.\n\n" + text
+                ),
+            }],
+        )
+        return resp.content[0].text.strip()
+    except Exception:
+        return text
+
+
 def _search_perplexity(query: str, max_tokens: int = 150) -> str:
     """Quick Perplexity search — synchronous."""
     api_key = os.getenv("PERPLEXITY_API_KEY", "")
@@ -140,11 +170,12 @@ async def check_price_moves():
                     alert_key = f"move_{ticker}_{date.today()}"
                     if not _is_duplicate(alert_key):
                         direction = "📈 עולה" if change_pct > 0 else "📉 יורד"
-                        reason = await asyncio.to_thread(
+                        reason_en = await asyncio.to_thread(
                             _search_perplexity,
                             f"Why is {ticker} stock moving {change_pct:+.1f}% today? "
                             f"What is the specific catalyst?",
                         )
+                        reason = await asyncio.to_thread(_translate_to_hebrew, reason_en)
                         msg = (
                             f"⚡ *תנועה חדה — {ticker}*\n"
                             f"{direction} `{change_pct:+.1f}%` | מחיר: `${curr_price:.2f}`\n\n"
@@ -240,9 +271,10 @@ async def check_news_catalysts():
             if news and "nothing significant" not in news.lower() and len(news) > 40:
                 alert_key = f"news_{ticker}_{hash(news[:40])}"
                 if not _is_duplicate(alert_key):
+                    news_hebrew = await asyncio.to_thread(_translate_to_hebrew, news)
                     msg = (
                         f"📰 *חדשות — {ticker}*\n\n"
-                        f"{news}\n\n"
+                        f"{news_hebrew}\n\n"
                         f"💡 רוצה ניתוח? שלח: `מה דעתך על {ticker}?`"
                     )
                     await _send_proactive_message(msg)
@@ -266,13 +298,14 @@ async def send_morning_briefing():
     except Exception:
         pass
 
-    # Macro calendar from Perplexity
-    macro = await asyncio.to_thread(
+    # Macro calendar from Perplexity → translated to Hebrew
+    macro_en = await asyncio.to_thread(
         _search_perplexity,
         f"Key economic events and earnings today {date.today().strftime('%B %d, %Y')}: "
         f"FOMC, CPI, NFP, major S&P500 earnings. Be specific with times.",
         200,
     )
+    macro_hebrew = await asyncio.to_thread(_translate_to_hebrew, macro_en)
 
     # GEX levels
     gex_text = ""
@@ -282,24 +315,36 @@ async def send_morning_briefing():
         if gex:
             regime_emoji = "🟢" if gex.gamma_regime == "POSITIVE" else "🔴"
             gex_text = (
-                f"\n📐 *GEX — SPY:*\n"
+                f"📐 *GEX — SPY:*\n"
                 f"Zero Gamma: `${gex.zero_gamma}` | "
                 f"Call Wall: `${gex.call_wall}` | "
                 f"Put Wall: `${gex.put_wall}`\n"
-                f"Regime: {regime_emoji} {gex.gamma_regime}"
+                f"Regime: {regime_emoji} `{gex.gamma_regime}`"
             )
     except Exception:
         pass
 
+    sections = []
+    if market_text:
+        sections.append(f"📊 *שוק — סנאפשוט:*\n{market_text}")
+    if gex_text:
+        sections.append(gex_text)
+    if macro_hebrew:
+        sections.append(f"📅 *לוח אירועים היום:*\n{macro_hebrew}")
+
+    body = ("\n\n" + "─" * 28 + "\n\n").join(sections)
+
     msg = (
-        f"🌅 *בוקר טוב חיים! — {day_name} {today}*\n"
-        f"{'━'*28}\n\n"
-        f"{market_text}\n"
-        f"{gex_text}\n\n"
-        f"📅 *לוח אירועים היום:*\n{macro}\n\n"
-        f"{'━'*28}\n"
-        f"💡 שלח `/regime` לניתוח שוק מלא\n"
-        f"📊 שלח `/strategist` להמלצות עסקאות"
+        f"🌅 *בוקר טוב חיים!*\n"
+        f"📆 {day_name} | {today}\n"
+        f"{'━'*30}\n\n"
+        f"{body}\n\n"
+        f"{'━'*30}\n"
+        f"🔍 *ניתוח מעמיק:*\n"
+        f"• `/regime` — ניתוח שוק + Regime\n"
+        f"• `/strategist` — המלצות עסקאות\n"
+        f"• `/zerod` — 0DTE Analysis\n"
+        f"• `/gex` — GEX + Gamma Levels"
     )
     await _send_proactive_message(msg)
     logger.info("Morning briefing sent")
@@ -309,17 +354,20 @@ async def send_evening_summary():
     """Send evening market summary at 23:30 Israel time."""
     today = date.today().strftime("%d/%m/%Y")
 
-    summary = await asyncio.to_thread(
+    summary_en = await asyncio.to_thread(
         _search_perplexity,
         f"Biggest stock market moves and news today {date.today().strftime('%B %d, %Y')}: "
         f"top 3 movers, why they moved, what to watch tomorrow.",
         200,
     )
+    summary = await asyncio.to_thread(_translate_to_hebrew, summary_en)
+
     tomorrow = (date.today() + timedelta(days=1)).strftime("%B %d, %Y")
-    tomorrow_events = await asyncio.to_thread(
+    tomorrow_events_en = await asyncio.to_thread(
         _search_perplexity,
         f"Major earnings and economic events tomorrow {tomorrow}. List the most important.",
     )
+    tomorrow_events = await asyncio.to_thread(_translate_to_hebrew, tomorrow_events_en)
 
     msg = (
         f"🌙 *סיכום יום — {today}*\n"
@@ -348,7 +396,8 @@ async def crawl_financial_sites():
             if content and len(content) > 50:
                 alert_key = f"crawl_{site_name}_{hash(content[:40])}"
                 if not _is_duplicate(alert_key):
-                    msg = f"🕷️ *{site_name} — עדכון אוטומטי*\n\n{content}"
+                    content_he = await asyncio.to_thread(_translate_to_hebrew, content)
+                    msg = f"🕷️ *{site_name} — עדכון אוטומטי*\n\n{content_he}"
                     await _send_proactive_message(msg)
             await asyncio.sleep(3)
         except Exception:
