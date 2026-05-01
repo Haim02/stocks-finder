@@ -460,6 +460,24 @@ class TradingAgent:
             if news:
                 parts.append(f"[נתוני אינטרנט]\n{news}")
 
+        # ── 7. SPY + VIX baseline — always included ───────────────────────────
+        if not any("SPY" in p or "VIX" in p for p in parts):
+            try:
+                spy_hist = yf.Ticker("SPY").history(period="2d")
+                vix_hist = yf.Ticker("^VIX").history(period="2d")
+                if not spy_hist.empty and not vix_hist.empty:
+                    spy_price = float(spy_hist["Close"].iloc[-1])
+                    spy_prev = float(spy_hist["Close"].iloc[-2])
+                    spy_chg = (spy_price / spy_prev - 1) * 100
+                    vix_price = float(vix_hist["Close"].iloc[-1])
+                    parts.append(
+                        f"[מצב שוק עכשיו]\n"
+                        f"SPY: ${spy_price:.2f} ({spy_chg:+.1f}%) | "
+                        f"VIX: {vix_price:.2f}"
+                    )
+            except Exception:
+                pass
+
         return "\n\n".join(parts)
 
     # ── Context Builder ──────────────────────────────────────────────────────
