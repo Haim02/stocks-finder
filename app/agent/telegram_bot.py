@@ -40,16 +40,74 @@ from telegram.ext import (
 )
 
 from app.core.config import settings
-from app.agent.free_chat import FreeChatHandler
+from app.agent.free_chat import get_agent, split_message
 
 logger = logging.getLogger(__name__)
 
-# ── Free chat handler (natural Hebrew conversation with Claude) ────────────────
-_free_chat = FreeChatHandler()
 
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle all free text messages, photos, and documents via TradingAgent."""
+    if not _is_authorized(update):
+        return
 
-async def free_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _free_chat.handle(update, context)
+    user_text = (update.message.text or update.message.caption or "").strip()
+    if not user_text and not update.message.photo and not update.message.document:
+        return
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+    agent = get_agent()
+
+    # Handle /learn inside free chat
+    if user_text.lower().startswith("/learn"):
+        reply = await agent.handle_learn(user_text)
+        try:
+            await update.message.reply_text(reply, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(reply)
+        return
+
+    # Image attachment
+    image_data = None
+    image_mime = None
+    if update.message.photo:
+        import io
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+        buf = io.BytesIO()
+        await file.download_to_memory(buf)
+        image_data = buf.getvalue()
+        image_mime = "image/jpeg"
+
+    # Document attachment
+    document_text = None
+    if update.message.document:
+        import io
+        doc = update.message.document
+        if doc.mime_type in ("text/plain",) or (doc.file_name or "").endswith((".txt", ".pdf")):
+            try:
+                file = await context.bot.get_file(doc.file_id)
+                buf = io.BytesIO()
+                await file.download_to_memory(buf)
+                document_text = buf.getvalue().decode("utf-8", errors="ignore")[:3000]
+            except Exception:
+                pass
+
+    if not user_text:
+        user_text = "שלחתי קובץ / תמונה — אנא נתח אותו."
+
+    reply = await agent.handle_message(
+        text=user_text,
+        image_data=image_data,
+        image_mime=image_mime,
+        document_text=document_text,
+    )
+
+    for chunk in split_message(reply):
+        try:
+            await update.message.reply_text(chunk, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(chunk)
 
 # ── Conversation states ───────────────────────────────────────────────────────
 GEX_WAITING_TICKER = 1   # /gex: waiting for user to type ticker name
@@ -1521,7 +1579,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 - /csp 10 — CSP רק מניות עד $10
 - /csp SOFI PLTR — CSP על מניות ספציפיות
 - /tvscan oversold — סריקת TradingView לפי סיגנל (30+ אינדיקטורים)
-- /tvscan strong\_buy — מניות עם STRONG BUY מ-TradingView
+- /tvscan strong_buy — מניות עם STRONG BUY מ-TradingView
 - /backtest AAPL — Backtest 6 אסטרטגיות (Sharpe + Win Rate + vs Buy&Hold)
 
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -1551,9 +1609,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 - /leaderboard — Top 15 מניות לפי ML
 
 ━━━━━━━━━━━━━━━━━━━━━━
-🧠 *ניהול ידע*
+🧠 *זיכרון ולמידה*
+- /myprofile — הפרופיל שלי (watchlist, אסטרטגיות, ידע)
+- /memory — 5 ההודעות האחרונות
+- /learn_url URL — למד מקישור ושמור לזיכרון
 - /learn <טקסט> — הוסף ידע לזיכרון
-- /reset — אפס שיחה
+- /reset — נקה היסטוריית שיחה (פרופיל נשמר)
 - /help — הרשימה הזו
 
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -1580,6 +1641,87 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 🔁 כל שעה Agent 3 | 🕔 16:45 סיכום"""
 
     await update.message.reply_text(msg, parse_mode="Markdown")
+
+
+async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/reset — Clear conversation history (profile is preserved)."""
+    if not _is_authorized(update):
+        return
+    agent = get_agent()
+    if agent.memory:
+        agent.memory.clear_history()
+    await update.message.reply_text(
+        "🔄 היסטוריית השיחה נוקתה.\n"
+        "הפרופיל שלך נשמר — אני עדיין זוכר מי אתה."
+    )
+
+
+async def learn_url_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/learn_url <URL> — Fetch URL and save to knowledge base."""
+    if not _is_authorized(update):
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "📝 שימוש: `/learn_url https://example.com`",
+            parse_mode="Markdown"
+        )
+        return
+    url = context.args[0]
+    await update.message.reply_text(f"📖 קורא את הקישור... {url}")
+    agent = get_agent()
+    result = await agent.learn_from_url(url)
+    await update.message.reply_text(result)
+
+
+async def myprofile_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/myprofile — Show user profile."""
+    if not _is_authorized(update):
+        return
+    agent = get_agent()
+    if not agent.memory:
+        await update.message.reply_text("⚠️ זיכרון לא זמין")
+        return
+    profile = agent.memory.get_profile()
+    watchlist = ", ".join(profile.get("watchlist", []))
+    strategies = ", ".join(profile.get("favorite_strategies", profile.get("strategies", [])))
+    knowledge = agent.memory.list_knowledge()
+    knowledge_list = "\n".join(f"  • {k['topic']}" for k in knowledge[:5]) or "  אין עדיין"
+    msg = (
+        f"👤 *הפרופיל שלי — חיים*\n"
+        f"{'━'*28}\n\n"
+        f"📈 *מניות במעקב:*\n{watchlist}\n\n"
+        f"🎯 *אסטרטגיות מועדפות:*\n{strategies}\n\n"
+        f"🧠 *ידע שנלמד:*\n{knowledge_list}\n\n"
+        f"🏦 ברוקר: {profile.get('broker', 'IB Israel')}\n"
+        f"🎯 מטרה: {profile.get('goal', '$1,000/שבוע')}"
+    )
+    try:
+        await update.message.reply_text(msg, parse_mode="Markdown")
+    except Exception:
+        await update.message.reply_text(msg)
+
+
+async def memory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/memory — Show recent conversation history."""
+    if not _is_authorized(update):
+        return
+    agent = get_agent()
+    if not agent.memory:
+        await update.message.reply_text("⚠️ זיכרון לא זמין")
+        return
+    messages = agent.memory.get_recent_messages(limit=5)
+    if not messages:
+        await update.message.reply_text("📭 אין היסטוריית שיחות עדיין.")
+        return
+    lines = ["🧠 *5 ההודעות האחרונות:*\n"]
+    for m in messages:
+        role = "אתה" if m["role"] == "user" else "🤖"
+        content = m["content"][:80] + "..." if len(m["content"]) > 80 else m["content"]
+        lines.append(f"*{role}:* {content}")
+    try:
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    except Exception:
+        await update.message.reply_text("\n".join(lines))
 
 
 async def cmd_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2558,10 +2700,16 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("watchlist",       watchlist_command))
     app.add_handler(CommandHandler("alerts",          alerts_command))
 
+    # ── Memory & learning commands ────────────────────────────────────────────
+    app.add_handler(CommandHandler("reset",           reset_command))
+    app.add_handler(CommandHandler("learn_url",       learn_url_command))
+    app.add_handler(CommandHandler("myprofile",       myprofile_command))
+    app.add_handler(CommandHandler("memory",          memory_command))
+
     # ── Free chat — MUST be registered LAST so it doesn't shadow /commands ────
-    app.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, free_chat_handler)
-    )
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+    app.add_handler(MessageHandler(filters.PHOTO, message_handler))
+    app.add_handler(MessageHandler(filters.Document.ALL, message_handler))
     _app = app
     return app
 
