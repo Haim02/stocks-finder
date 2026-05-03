@@ -1200,37 +1200,84 @@ async def otc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 async def train_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Retrain XGBoost + update alert accuracy from MongoDB."""
+    """Retrain XGBoost + analyze alert accuracy if data exists."""
     if not _is_authorized(update):
         return
-    await update.message.reply_text("🤖 מאמן מחדש את XGBoost + מנתח דיוק התראות...")
-    try:
-        # Step 1: Update alert outcomes from MongoDB
-        from app.services.live_monitor import update_alert_outcomes_sync
-        await asyncio.to_thread(update_alert_outcomes_sync)
+    await update.message.reply_text("🤖 מאמן מחדש את XGBoost...")
 
-        # Step 2: Load alert training data
+    try:
+        # Step 1: Update alert outcomes
+        try:
+            from app.services.live_monitor import update_alert_outcomes_sync
+            update_alert_outcomes_sync()
+        except Exception:
+            pass
+
+        # Step 2: Check how many alerts exist
         from app.data.mongo_client import MongoDB
         db = MongoDB.get_db()
-        alerts  = list(db["alert_training_data"].find(
+        total_alerts = db["alert_training_data"].count_documents({})
+        verified_alerts = db["alert_training_data"].count_documents(
             {"was_correct": {"$ne": None}}
-        ).limit(100))
-        correct  = sum(1 for a in alerts if a.get("was_correct") is True)
-        total    = len(alerts)
-        accuracy = round(correct / total * 100, 1) if total > 0 else 0
+        )
 
         # Step 3: Retrain XGBoost
-        from train_model import train_xgb_model
-        await asyncio.to_thread(train_xgb_model)
+        training_msg = ""
+        try:
+            from train_model import train_xgb_model
+            train_xgb_model()
+            training_msg = "✅ XGBoost אומן מחדש בהצלחה"
+        except Exception as e:
+            training_msg = f"⚠️ XGBoost: {str(e)[:100]}"
+
+        # Step 4: Build response based on data availability
+        if total_alerts == 0:
+            alerts_section = (
+                "📊 *ניתוח התראות:*\n"
+                "אין עדיין התראות לניתוח.\n"
+                "המערכת צריכה לפחות 24 שעות לאסוף נתונים.\n"
+                "ניתוח יהיה זמין ב-/train הבא."
+            )
+        elif verified_alerts == 0:
+            alerts_section = (
+                f"📊 *ניתוח התראות:*\n"
+                f"יש `{total_alerts}` התראות שנשמרו.\n"
+                f"ממתין 24 שעות לבדיקת תוצאות.\n"
+                f"נסה שוב מחר."
+            )
+        else:
+            alerts = list(db["alert_training_data"].find(
+                {"was_correct": {"$ne": None}}
+            ).limit(100))
+            correct = sum(1 for a in alerts if a.get("was_correct") is True)
+            accuracy = round(correct / len(alerts) * 100, 1)
+
+            type_stats: dict = {}
+            for a in alerts:
+                t = a.get("alert_type", "OTHER")
+                if t not in type_stats:
+                    type_stats[t] = {"total": 0, "correct": 0}
+                type_stats[t]["total"] += 1
+                if a.get("was_correct"):
+                    type_stats[t]["correct"] += 1
+
+            type_lines = "\n".join(
+                f"  • {t}: {round(v['correct']/v['total']*100)}% ({v['correct']}/{v['total']})"
+                for t, v in type_stats.items()
+            )
+
+            alerts_section = (
+                f"📊 *ניתוח התראות:*\n"
+                f"סה\"כ נבדקו: `{len(alerts)}`\n"
+                f"דיוק כולל: `{accuracy}%`\n\n"
+                f"לפי סוג:\n{type_lines}"
+            )
 
         await update.message.reply_text(
-            f"✅ *אימון הושלם!*\n\n"
-            f"📊 *ניתוח דיוק התראות:*\n"
-            f"• סה\"כ התראות שנבדקו: `{total}`\n"
-            f"• דיוק: `{accuracy}%` ({correct}/{total})\n\n"
-            f"XGBoost עודכן עם הנתונים החדשים.",
+            f"{training_msg}\n\n{alerts_section}",
             parse_mode="Markdown",
         )
+
     except Exception as e:
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
