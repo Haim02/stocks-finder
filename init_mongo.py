@@ -29,6 +29,7 @@ def init_db():
         ("agent_run_log",              "started_at",  7 * 24 * 3600),
         ("training_events",            "timestamp",  90 * 24 * 3600),
         ("monitor_alerts_log",         "timestamp",   7 * 24 * 3600),
+        ("alert_training_data",        "timestamp",   7 * 24 * 3600),
     ]
     for collection, field, ttl in ttl_indexes:
         try:
@@ -36,6 +37,14 @@ def init_db():
             print(f"✅ TTL index '{field}' on '{collection}' ({ttl // 86400}d).")
         except Exception as e:
             print(f"⚠️ TTL index '{collection}.{field}' info: {e}")
+
+    # alert_training_data — extra query indexes
+    for field in ["ticker", "alert_type"]:
+        try:
+            db["alert_training_data"].create_index(field)
+            print(f"✅ Index '{field}' on 'alert_training_data'.")
+        except Exception as e:
+            print(f"⚠️ Index 'alert_training_data.{field}' info: {e}")
 
     print("🚀 MongoDB setup complete!")
 

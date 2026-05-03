@@ -1603,3 +1603,37 @@ NEVER recommend 0DTE SPY when:
 - Slow grind approach
 
 *Source: @LA0DTE 0DTE SPY Playbook — Verified +$5,805 P&L, 20W/3L, April 2026*
+
+
+---
+
+## מערכת התראות חכמה v2
+
+### תדירות: כל 2 שעות
+### שעות פעילות: ראשון-חמישי 10:00-22:00 שעון ישראל
+
+### מה נשלח (HIGH VALUE):
+- תנועות > 3% בSPY, QQQ, S&P 500 Mega Caps
+- M&A, רכישות, הסכמים גדולים
+- אישורי FDA
+- ניצחונות בEarnings גדולים
+- אירועים גיאופוליטיים (מלחמות, סנקציות, מכסים)
+- IV Rank > 70% במניות מרכזיות
+
+### מה לא נשלח (FILTERED):
+- נאומי פד (אלא אם החלטת ריבית)
+- דעות אנליסטים
+- ספקולציות
+- חדשות קטנות מתחת ל-3% תנועה
+
+### לולאת למידה עם XGBoost:
+כל התראה נשמרת ב-MongoDB (alert_training_data) עם:
+- ticker, alert_type, headline, action
+- price_at_alert
+- price_24h_later (מתעדכן אוטומטית ב-/train)
+- was_correct (האם הציפייה התגשמה)
+
+בכל /train:
+1. מעדכן תוצאות ההתראות האחרונות
+2. מחשב דיוק כולל
+3. XGBoost לומד מהנתונים — אילו חדשות הזיזו מחירים

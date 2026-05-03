@@ -209,43 +209,35 @@ def run_daemon() -> None:
     except ImportError:
         logger.warning("news_alert_engine not available — news alert jobs skipped")
 
-    # ── Live Monitor — 24/7 proactive intelligence ────────────────────────────
+    # ── Smart Alert System v2 — every 2 hours, 10:00-22:00 Israel ───────────
     try:
         from app.services.live_monitor import (
-            run_15min_scan_sync,
-            run_30min_crawl_sync,
+            run_2hour_scan_sync,
             run_morning_briefing_sync,
             run_evening_summary_sync,
         )
 
-        # Price moves + IV spikes + earnings warnings + news catalysts
-        scheduler.add_job(
-            run_15min_scan_sync,
-            trigger=CronTrigger(
-                day_of_week="mon-fri",
-                hour="16-23",
-                minute="*/15",
-                timezone=SCAN_TZ,
-            ),
-            id="live_monitor_15min",
-            name="Live Monitor — 15min scan (16:00–23:00 Israel)",
-            replace_existing=True,
-            misfire_grace_time=120,
-        )
+        # Remove old jobs if they exist (upgrade from v1)
+        for old_job in ["live_monitor_15min", "web_crawler_30min",
+                        "news_alert_scan", "premarket_news_scan"]:
+            try:
+                scheduler.remove_job(old_job)
+            except Exception:
+                pass
 
-        # SEC filings / Fed / options flow crawl
+        # Every 2 hours, Mon-Fri, 10:00-22:00 Israel time
         scheduler.add_job(
-            run_30min_crawl_sync,
+            run_2hour_scan_sync,
             trigger=CronTrigger(
                 day_of_week="mon-fri",
-                hour="16-23",
-                minute="*/30",
+                hour="10,12,14,16,18,20,22",
+                minute=0,
                 timezone=SCAN_TZ,
             ),
-            id="web_crawler_30min",
-            name="Web Crawler — 30min (SEC/Fed/Flow)",
+            id="smart_scan_2h",
+            name="Smart Alert Scan — 2h (10:00–22:00 Israel)",
             replace_existing=True,
-            misfire_grace_time=120,
+            misfire_grace_time=300,
         )
 
         # Morning briefing (09:00 Israel)
@@ -263,25 +255,23 @@ def run_daemon() -> None:
             misfire_grace_time=300,
         )
 
-        # Evening summary (23:30 Israel)
+        # Evening summary (22:30 Israel)
         scheduler.add_job(
             run_evening_summary_sync,
             trigger=CronTrigger(
                 day_of_week="mon-fri",
-                hour=23,
+                hour=22,
                 minute=30,
                 timezone=SCAN_TZ,
             ),
             id="evening_summary",
-            name="Evening Summary (23:30 Israel)",
+            name="Evening Summary (22:30 Israel)",
             replace_existing=True,
             misfire_grace_time=300,
         )
-        logger.info(
-            "Live monitor scheduled: 15min scans + 30min crawl + morning/evening briefings"
-        )
+        logger.info("Smart alert system v2 scheduled: 2h scans + morning/evening briefings")
     except ImportError:
-        logger.warning("live_monitor not available — live monitor jobs skipped")
+        logger.warning("live_monitor not available — smart alert jobs skipped")
 
     scheduler.start()
 

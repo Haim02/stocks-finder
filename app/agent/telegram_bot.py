@@ -1200,11 +1200,37 @@ async def otc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 async def train_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("🤖 מאמן מחדש את מודל XGBoost...")
+    """Retrain XGBoost + update alert accuracy from MongoDB."""
+    if not _is_authorized(update):
+        return
+    await update.message.reply_text("🤖 מאמן מחדש את XGBoost + מנתח דיוק התראות...")
     try:
+        # Step 1: Update alert outcomes from MongoDB
+        from app.services.live_monitor import update_alert_outcomes_sync
+        await asyncio.to_thread(update_alert_outcomes_sync)
+
+        # Step 2: Load alert training data
+        from app.data.mongo_client import MongoDB
+        db = MongoDB.get_db()
+        alerts  = list(db["alert_training_data"].find(
+            {"was_correct": {"$ne": None}}
+        ).limit(100))
+        correct  = sum(1 for a in alerts if a.get("was_correct") is True)
+        total    = len(alerts)
+        accuracy = round(correct / total * 100, 1) if total > 0 else 0
+
+        # Step 3: Retrain XGBoost
         from train_model import train_xgb_model
-        train_xgb_model()
-        await update.message.reply_text("✅ אימון הושלם!")
+        await asyncio.to_thread(train_xgb_model)
+
+        await update.message.reply_text(
+            f"✅ *אימון הושלם!*\n\n"
+            f"📊 *ניתוח דיוק התראות:*\n"
+            f"• סה\"כ התראות שנבדקו: `{total}`\n"
+            f"• דיוק: `{accuracy}%` ({correct}/{total})\n\n"
+            f"XGBoost עודכן עם הנתונים החדשים.",
+            parse_mode="Markdown",
+        )
     except Exception as e:
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
