@@ -1206,104 +1206,75 @@ async def train_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text("🤖 מאמן מחדש את XGBoost...")
 
     try:
-        # Step 1: Update alert outcomes
+        # Update alert outcomes
         try:
             from app.services.live_monitor import update_alert_outcomes_sync
             update_alert_outcomes_sync()
         except Exception:
             pass
 
-        # Step 2: Check how many alerts exist
+        # Check alerts in DB
         from app.data.mongo_client import MongoDB
         db = MongoDB.get_db()
         total_alerts = db["alert_training_data"].count_documents({})
-        verified_alerts = db["alert_training_data"].count_documents(
+        verified = db["alert_training_data"].count_documents(
             {"was_correct": {"$ne": None}}
         )
 
-        # Step 3: Retrain XGBoost
-        training_msg = ""
+        # Retrain XGBoost
+        training_result = ""
         try:
             from train_model import train_xgb_model
             result = train_xgb_model()
-
             if isinstance(result, dict):
-                acc        = result.get("accuracy", 0)
-                n_samples  = result.get("n_samples", 0)
-                n_features = result.get("n_features", 0)
-                top_feats  = result.get("top_features", [])
-
-                features_text = ""
-                if top_feats:
-                    features_text = "\n*פיצ'רים חשובים ביותר:*\n" + "\n".join(
-                        f"  • {f['name']}: `{f['importance']:.3f}`"
-                        for f in top_feats[:5]
-                    )
-
-                training_msg = (
-                    f"✅ *XGBoost אומן בהצלחה!*\n"
-                    f"──────────────────────────\n"
-                    f"📊 דוגמאות: `{n_samples}`\n"
-                    f"🔢 פיצ'רים: `{n_features}`\n"
-                    f"🎯 דיוק (test): `{acc:.1f}%`"
-                    f"{features_text}"
+                acc   = result.get("accuracy", 0)
+                n     = result.get("n_samples", 0)
+                feats = result.get("n_features", 0)
+                top   = result.get("top_features", [])
+                feat_lines = "\n".join(
+                    f"  {f['name']}: {f['importance']:.3f}"
+                    for f in top[:5]
+                ) if top else ""
+                training_result = (
+                    f"XGBoost אומן בהצלחה\n"
+                    f"דוגמאות: {n} | פיצ'רים: {feats}\n"
+                    f"דיוק: {acc:.1f}%\n"
                 )
+                if feat_lines:
+                    training_result += f"\nפיצ'רים חשובים:\n{feat_lines}\n"
             else:
-                training_msg = "✅ XGBoost אומן מחדש בהצלחה"
-
+                training_result = "XGBoost אומן בהצלחה\n"
         except Exception as e:
-            training_msg = f"⚠️ XGBoost: {str(e)[:100]}"
+            training_result = f"שגיאה באימון: {str(e)[:80]}\n"
 
-        # Step 4: Build response based on data availability
+        # Alerts section
         if total_alerts == 0:
-            alerts_section = (
-                "📊 *ניתוח התראות:*\n"
-                "אין עדיין התראות לניתוח.\n"
-                "המערכת צריכה לפחות 24 שעות לאסוף נתונים.\n"
-                "ניתוח יהיה זמין ב-/train הבא."
-            )
-        elif verified_alerts == 0:
-            alerts_section = (
-                f"📊 *ניתוח התראות:*\n"
-                f"יש `{total_alerts}` התראות שנשמרו.\n"
-                f"ממתין 24 שעות לבדיקת תוצאות.\n"
-                f"נסה שוב מחר."
-            )
+            alerts_result = "אין עדיין התראות לניתוח — המערכת צריכה יום להצטבר"
+        elif verified == 0:
+            alerts_result = f"יש {total_alerts} התראות שנשמרו. ממתין 24 שעות לתוצאות"
         else:
             alerts = list(db["alert_training_data"].find(
                 {"was_correct": {"$ne": None}}
             ).limit(100))
-            correct = sum(1 for a in alerts if a.get("was_correct") is True)
-            accuracy = round(correct / len(alerts) * 100, 1)
-
-            type_stats: dict = {}
-            for a in alerts:
-                t = a.get("alert_type", "OTHER")
-                if t not in type_stats:
-                    type_stats[t] = {"total": 0, "correct": 0}
-                type_stats[t]["total"] += 1
-                if a.get("was_correct"):
-                    type_stats[t]["correct"] += 1
-
-            type_lines = "\n".join(
-                f"  • {t}: {round(v['correct']/v['total']*100)}% ({v['correct']}/{v['total']})"
-                for t, v in type_stats.items()
+            correct = sum(1 for a in alerts if a.get("was_correct"))
+            acc_pct = round(correct / len(alerts) * 100, 1)
+            alerts_result = (
+                f"ניתוח התראות: {len(alerts)} נבדקו\n"
+                f"דיוק: {acc_pct}% ({correct}/{len(alerts)})"
             )
 
-            alerts_section = (
-                f"📊 *ניתוח התראות:*\n"
-                f"סה\"כ נבדקו: `{len(alerts)}`\n"
-                f"דיוק כולל: `{accuracy}%`\n\n"
-                f"לפי סוג:\n{type_lines}"
-            )
-
-        await update.message.reply_text(
-            f"{training_msg}\n\n{alerts_section}",
-            parse_mode="Markdown",
+        msg = (
+            f"✅ אימון הושלם!\n"
+            f"{'─'*26}\n"
+            f"{training_result}\n"
+            f"{'─'*26}\n"
+            f"{alerts_result}"
         )
 
+        await update.message.reply_text(msg)
+
     except Exception as e:
-        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+        await update.message.reply_text(f"שגיאה: {str(e)[:200]}")
 
 
 async def cmd_analyze_ticker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
