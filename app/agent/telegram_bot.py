@@ -1225,8 +1225,32 @@ async def train_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         training_msg = ""
         try:
             from train_model import train_xgb_model
-            train_xgb_model()
-            training_msg = "✅ XGBoost אומן מחדש בהצלחה"
+            result = train_xgb_model()
+
+            if isinstance(result, dict):
+                acc        = result.get("accuracy", 0)
+                n_samples  = result.get("n_samples", 0)
+                n_features = result.get("n_features", 0)
+                top_feats  = result.get("top_features", [])
+
+                features_text = ""
+                if top_feats:
+                    features_text = "\n*פיצ'רים חשובים ביותר:*\n" + "\n".join(
+                        f"  • {f['name']}: `{f['importance']:.3f}`"
+                        for f in top_feats[:5]
+                    )
+
+                training_msg = (
+                    f"✅ *XGBoost אומן בהצלחה!*\n"
+                    f"──────────────────────────\n"
+                    f"📊 דוגמאות: `{n_samples}`\n"
+                    f"🔢 פיצ'רים: `{n_features}`\n"
+                    f"🎯 דיוק (test): `{acc:.1f}%`"
+                    f"{features_text}"
+                )
+            else:
+                training_msg = "✅ XGBoost אומן מחדש בהצלחה"
+
         except Exception as e:
             training_msg = f"⚠️ XGBoost: {str(e)[:100]}"
 

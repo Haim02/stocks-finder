@@ -356,6 +356,8 @@ import joblib
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
 
 try:
     import xgboost as xgb
@@ -518,8 +520,11 @@ def build_dataset(tickers: list[str]) -> tuple[pd.DataFrame, pd.Series]:
     return pd.concat(all_X, ignore_index=True), pd.concat(all_y, ignore_index=True)
 
 
-def train_xgb_model() -> None:
-    """Train and save XGBoost model predicting ≥5 % gain in 10 trading days."""
+def train_xgb_model() -> dict:
+    """Train and save XGBoost model predicting ≥5 % gain in 10 trading days.
+
+    Returns a metrics dict: accuracy, n_samples, n_features, top_features.
+    """
     logger.info("=== XGBoost Price Model Training ===")
     logger.info(
         "Target: %.0f%% gain within %d trading days",
@@ -541,6 +546,10 @@ def train_xgb_model() -> None:
         len(y), pos_rate, spw,
     )
 
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+
     model = xgb.XGBClassifier(
         n_estimators=300,
         max_depth=4,
@@ -552,16 +561,44 @@ def train_xgb_model() -> None:
         random_state=42,
         verbosity=0,
     )
-    model.fit(X, y)
+    model.fit(X_train, y_train)
     logger.info("Training complete.")
 
     os.makedirs(MODEL_DIR, exist_ok=True)
     joblib.dump({"model": model, "features": FEATURE_COLS}, XGB_MODEL_PATH)
     logger.info("Model saved → %s", XGB_MODEL_PATH)
 
+    # ── Metrics ──────────────────────────────────────────────────────────────
+    acc = 0.0
+    if len(X_test) > 0:
+        y_pred = model.predict(X_test)
+        acc = accuracy_score(y_test, y_pred) * 100
+    logger.info("Test accuracy: %.1f%%", acc)
+
+    top_features: list[dict] = []
+    if hasattr(model, "feature_importances_"):
+        feat_names = X.columns.tolist() if hasattr(X, "columns") else [f"f{i}" for i in range(len(model.feature_importances_))]
+        feat_imp = sorted(
+            zip(feat_names, model.feature_importances_),
+            key=lambda kv: kv[1],
+            reverse=True,
+        )
+        top_features = [
+            {"name": name, "importance": float(imp)}
+            for name, imp in feat_imp[:5]
+        ]
+        logger.info("Top features: %s", [f["name"] for f in top_features])
+
     sample = X.sample(min(10, len(X)), random_state=1)
     probs  = model.predict_proba(sample)[:, 1]
     logger.info("Sample confidence scores: %s", np.round(probs, 3))
+
+    return {
+        "accuracy":   round(acc, 1),
+        "n_samples":  len(X),
+        "n_features": X.shape[1] if hasattr(X, "shape") else 0,
+        "top_features": top_features,
+    }
 
 
 if __name__ == "__main__":
