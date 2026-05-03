@@ -367,7 +367,7 @@ def format_iv_scan_telegram(results: list[IVScanResult], perplexity_notes: dict 
             x_note = f"\n  🐦 X: {perplexity_notes[r.ticker][:80]}"
 
         lines.append(
-            f"*{i}. {r.ticker}* | ${r.price}\n"
+            f"*{i}. {r.ticker}* | `${r.price}`\n"
             f"  {lv} IV: `{r.iv_current:.0f}%` {rv} Rank: `{r.iv_rank:.0f}%`\n"
             f"  📐 Expected Move ±`${r.expected_move}`/30d\n"
             f"  🎯 אסטרטגיה: *{r.recommended_strategy}*\n"
@@ -375,9 +375,9 @@ def format_iv_scan_telegram(results: list[IVScanResult], perplexity_notes: dict 
             f"  🔍 *למה IV גבוה:* {r.news_catalyst}"
             f"{earn_str}{x_note}"
         )
+        lines.append("──────────────────────────")
 
     lines.append(
-        "\n━━━━━━━━━━━━━━━━\n"
         "📊 *מדריך IV:*\n"
         "❄️ <25% = נמוך | 🔵 25-50% = בינוני\n"
         "🔥 50-70% = גבוה | 🚨 70-100% = גבוה מאוד\n"

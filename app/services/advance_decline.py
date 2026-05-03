@@ -229,7 +229,7 @@ def format_ad_line_hebrew(ad: ADLineResult) -> str:
 
     return (
         f"📈 *Advance/Decline Line Analysis*\n"
-        f"{'━'*30}\n\n"
+        f"──────────────────────────\n\n"
 
         f"{ad.signal} *דיברגנס: {ad.divergence}*\n"
         f"{ad.divergence_note}\n\n"

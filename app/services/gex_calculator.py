@@ -287,7 +287,7 @@ def format_gex_hebrew(g: GEXResult) -> str:
     return (
         f"📊 *GEX Analysis — {g.symbol}*\n"
         f"🕙 {g.calculation_time} | מחיר: `${g.spot_price}`\n"
-        f"{'━'*30}\n\n"
+        f"──────────────────────────\n\n"
 
         f"{regime_emoji} *Gamma Regime: {g.gamma_regime}*\n"
         f"{g.regime_note}\n\n"
@@ -297,10 +297,10 @@ def format_gex_hebrew(g: GEXResult) -> str:
         f"• ⚡ Zero Gamma (פליפ): `${g.zero_gamma}` ({g.dist_to_zero_gamma:+.1f}%)\n"
         f"• ⚠️ Vol Trigger: `${g.vol_trigger}`\n"
         f"• 🟢 Put Wall (תמיכה): `${g.put_wall}` ({g.dist_to_put_wall:+.1f}%)\n"
-        f"• Net GEX: `${net_sign}{g.net_gex:.2f}B`\n\n"
+        f"• 💰 Net GEX: `${net_sign}{g.net_gex:.2f}B`\n\n"
 
         f"💡 *פרשנות:*\n{g.interpretation}\n\n"
 
-        f"{'━'*30}\n"
+        f"──────────────────────────\n"
         f"🎯 *השלכה אסטרטגית:*\n{g.strategy_implication}"
     )

@@ -353,20 +353,24 @@ def format_debate_hebrew(result: DebateResult) -> str:
     verdict_heb = {"BULLISH": "שורי", "BEARISH": "דובי", "NEUTRAL": "נייטרל"}.get(result.verdict, result.verdict)
     risk_badge = "✅ מאושר" if result.risk_compatible else "⚠️ יש סייגים"
 
+    filled = int(result.confidence / 10)
+    conf_bar = "█" * filled + "░" * (10 - filled)
+
     lines = [
         f"⚔️ *Bull vs Bear Debate — {result.ticker}*",
-        f"━━━━━━━━━━━━━━━━━━━━━━",
-        f"💰 מחיר: ${result.current_price:.2f} | IV Rank: {result.iv_rank:.0f}%",
+        f"──────────────────────────",
+        f"💰 מחיר: `${result.current_price:.2f}` | IV Rank: `{result.iv_rank:.0f}%`",
         "",
-        f"🐂 *Bull Case* (Conviction: {result.bull_score:.0f}/100)",
+        f"🐂 *Bull Case* (Conviction: `{result.bull_score:.0f}/100`)",
         result.bull_thesis,
         "",
-        f"🐻 *Bear Case* (Risk Score: {result.bear_risk_score:.0f}/100)",
+        f"🐻 *Bear Case* (Risk Score: `{result.bear_risk_score:.0f}/100`)",
         result.bear_thesis,
         "",
-        f"━━━━━━━━━━━━━━━━━━━━━━",
+        f"──────────────────────────",
         f"⚖️ *פסיקת השופט:*",
-        f"{verdict_emoji} Verdict: *{verdict_heb}* | Confidence: {result.confidence:.0f}%",
+        f"{verdict_emoji} Verdict: *{verdict_heb}*",
+        f"ביטחון: `[{conf_bar}]` `{result.confidence:.0f}%`",
         f"📋 Strategy: *{result.strategy}*",
         f"💭 {result.reason}",
         "",

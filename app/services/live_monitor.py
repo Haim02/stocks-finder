@@ -298,7 +298,7 @@ async def check_big_price_moves():
 
             msg = (
                 f"⚡ *תנועה חדה — {ticker}*\n"
-                f"{'━'*26}\n"
+                f"──────────────────────────\n"
                 f"{direction} `{change_pct:+.1f}%` | מחיר: `${curr:.2f}`\n\n"
                 f"💬 *מה קרה:*\n{reason_heb}"
                 f"{xgb_note}\n\n"
@@ -353,7 +353,7 @@ async def check_major_news():
 
     msg = (
         f"📰 *חדשות חשובות — {today}*\n"
-        f"{'━'*26}\n\n"
+        f"──────────────────────────\n\n"
         f"{news_heb}\n\n"
         f"💡 רוצה ניתוח? שאל אותי ישירות"
     )
@@ -391,7 +391,7 @@ async def check_geopolitical():
 
     msg = (
         f"🌍 *אירוע גיאופוליטי*\n"
-        f"{'━'*26}\n\n"
+        f"──────────────────────────\n\n"
         f"{news_heb}\n\n"
         f"📊 *השפעה צפויה:* שאל `/regime` לניתוח מלא"
     )
@@ -425,6 +425,7 @@ async def check_iv_spikes():
 
                 msg = (
                     f"🔥 *IV גבוה מאוד — {ticker}*\n"
+                    f"──────────────────────────\n"
                     f"IV Rank: `{iv_data.iv_rank:.0f}%` | "
                     f"מחיר: `${iv_data.current_price:.2f}`\n"
                     f"Expected Move: `±${iv_data.expected_move_30d}`\n\n"
@@ -507,11 +508,11 @@ async def send_morning_briefing():
 
     msg = (
         f"🌅 *בוקר טוב חיים! — {day_name} {today}*\n"
-        f"{'━'*28}\n\n"
+        f"──────────────────────────\n\n"
         f"📊 *שווקים:*\n{market_text}\n\n"
-        f"{'━'*28}\n"
+        f"──────────────────────────\n"
         f"📅 *היום לשים לב:*\n{events_heb}\n\n"
-        f"{'━'*28}\n"
+        f"──────────────────────────\n"
         f"/regime — ניתוח מלא | /strategist — עסקאות"
     )
 
@@ -535,7 +536,7 @@ async def send_evening_summary():
 
     msg = (
         f"🌙 *סיכום יום — {today}*\n"
-        f"{'━'*28}\n\n"
+        f"──────────────────────────\n\n"
         f"{summary_heb}"
     )
 
