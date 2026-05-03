@@ -2022,14 +2022,18 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """/scan [TICKER ...] — Run options engine scanner."""
     if not _is_authorized(update):
         return
-    await update.message.reply_text("🔍 סורק אופציות... ~30 שניות")
+    tickers = [a.upper() for a in context.args] if context.args else ["SPY", "QQQ", "NVDA", "AAPL", "TSLA"]
+    await update.message.reply_text(f"📊 סורק {', '.join(tickers)}... ~30 שניות")
     try:
-        from app.options_engine.scanner import run_options_engine
-        symbols = [a.upper() for a in context.args] if context.args else None
-        results = run_options_engine(symbols)
-        if not results:
-            await update.message.reply_text("😴 לא נמצאו הזדמנויות. נסה כשהשוק פתוח.")
+        from app.options_engine.scanner import run_options_engine, format_scan_results_hebrew
+        results = run_options_engine(tickers)
+        msg = format_scan_results_hebrew(results)
+        try:
+            await update.message.reply_text(msg, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(msg)
     except Exception as e:
+        logger.exception("scan_command failed")
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 

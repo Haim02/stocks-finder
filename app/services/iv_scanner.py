@@ -338,50 +338,61 @@ def format_iv_scan_telegram(results: list[IVScanResult], perplexity_notes: dict 
     if not results:
         return "⚠️ לא נמצאו מניות עם IV גבוה כרגע."
 
-    level_emoji = {
-        "LOW": "❄️", "MEDIUM": "🔵", "HIGH": "🔥",
-        "VERY_HIGH": "🚨", "EXTREME": "💥",
-    }
-    rank_emoji = {
-        "LOW": "📉", "MEDIUM": "➡️", "HIGH": "📈", "VERY_HIGH": "🚀",
-    }
-
     lines = [
         f"🔥 *סורק IV גבוה — {date.today().strftime('%d/%m/%Y')}*",
-        f"נמצאו {len(results)} מניות עם IV Rank > 50%\n",
+        f"נמצאו {len(results)} הזדמנויות למכירת פרמיה",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
     ]
 
     for i, r in enumerate(results[:8], 1):
-        lv = level_emoji.get(r.iv_level, "🔵")
-        rv = rank_emoji.get(r.iv_rank_level, "➡️")
+        if r.iv_current >= 100:
+            iv_label = "💥 קיצוני"
+        elif r.iv_current >= 70:
+            iv_label = "🚨 גבוה מאוד"
+        elif r.iv_current >= 50:
+            iv_label = "🔥 גבוה"
+        elif r.iv_current >= 25:
+            iv_label = "🔵 בינוני"
+        else:
+            iv_label = "❄️ נמוך"
 
-        earn_str = ""
+        strat = r.recommended_strategy
+        strat_emoji = (
+            "🔴" if any(k in strat for k in ("Spread", "Condor", "Strangle", "CSP"))
+            else "🔵" if any(k in strat for k in ("Long", "LEAPs", "Debit"))
+            else "🔄"
+        )
+
+        earn_line = ""
         if r.has_earnings_soon and r.earnings_days_away is not None:
-            if r.earnings_days_away <= 3:
-                earn_str = f"\n  🚨 *Earnings בעוד {r.earnings_days_away} ימים!*"
-            else:
-                earn_str = f"\n  📅 Earnings: {r.earnings_date} ({r.earnings_days_away}d)"
+            if r.earnings_days_away <= 5:
+                earn_line = f"\n  🚨 *Earnings בעוד {r.earnings_days_away} ימים — זהירות!*"
+            elif r.earnings_days_away <= 14:
+                earn_line = f"\n  ⚠️ Earnings בעוד {r.earnings_days_away} ימים"
 
-        x_note = ""
+        news_line = ""
         if perplexity_notes and r.ticker in perplexity_notes:
-            x_note = f"\n  🐦 X: {perplexity_notes[r.ticker][:80]}"
+            note = perplexity_notes[r.ticker]
+            if note and "cannot provide" not in note.lower():
+                news_line = f"\n  🌐 {note[:80]}"
+
+        catalyst_parts = [p.strip() for p in r.news_catalyst.split("|") if p.strip()]
+        catalyst_clean = " | ".join(catalyst_parts[:2])
 
         lines.append(
-            f"*{i}. {r.ticker}* | `${r.price}`\n"
-            f"  {lv} IV: `{r.iv_current:.0f}%` {rv} Rank: `{r.iv_rank:.0f}%`\n"
-            f"  📐 Expected Move ±`${r.expected_move}`/30d\n"
-            f"  🎯 אסטרטגיה: *{r.recommended_strategy}*\n"
-            f"  💡 {r.strategy_reason}\n"
-            f"  🔍 *למה IV גבוה:* {r.news_catalyst}"
-            f"{earn_str}{x_note}"
+            f"\n*{i}. {r.ticker}* — `${r.price:.2f}`\n"
+            f"  {iv_label} | IV: `{r.iv_current:.0f}%` | Rank: `{r.iv_rank:.0f}%`\n"
+            f"  📐 תנועה צפויה: `±${r.expected_move:.2f}` ב-30 יום\n"
+            f"  {strat_emoji} *המלצה:* {strat}\n"
+            f"  🔍 *למה:* {catalyst_clean}"
+            f"{earn_line}"
+            f"{news_line}\n"
+            f"  ──────────────────────────"
         )
-        lines.append("──────────────────────────")
 
     lines.append(
-        "📊 *מדריך IV:*\n"
-        "❄️ <25% = נמוך | 🔵 25-50% = בינוני\n"
-        "🔥 50-70% = גבוה | 🚨 70-100% = גבוה מאוד\n"
-        "💥 100%+ = קיצוני (earnings/meme/catalyst)"
+        "\n📊 *מדריך:*  "
+        "❄️ נמוך  🔵 בינוני  🔥 גבוה  🚨 גבוה מאוד  💥 קיצוני"
     )
 
     return "\n".join(lines)
