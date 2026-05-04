@@ -294,6 +294,20 @@ def scan_high_iv(
             logger.debug("IV scan failed for %s: %s", ticker, e)
 
     results.sort(key=lambda x: x.opportunity_score, reverse=True)
+
+    try:
+        from app.services.brain_logger import log_interaction
+        for r in results[:max_results]:
+            log_interaction(
+                "scan",
+                f"IV scan: {r.ticker} IV={r.iv_current:.0f}% Rank={r.iv_rank:.0f}% Score={r.opportunity_score:.0f}",
+                tickers=[r.ticker],
+                strategy=r.recommended_strategy,
+                price_at_time=r.price,
+            )
+    except Exception:
+        pass
+
     return results[:max_results]
 
 

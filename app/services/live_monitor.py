@@ -315,6 +315,17 @@ async def check_big_price_moves():
                     price_at_alert=curr,
                 )
                 logger.info("Price alert sent: %s %+.1f%%", ticker, change_pct)
+                try:
+                    from app.services.brain_logger import log_interaction
+                    log_interaction(
+                        "alert",
+                        f"{ticker} moved {change_pct:+.1f}%: {reason_raw[:200]}",
+                        tickers=[ticker],
+                        price_at_time=curr,
+                        metadata={"change_pct": round(change_pct, 2)},
+                    )
+                except Exception:
+                    pass
 
             await asyncio.sleep(2)
 

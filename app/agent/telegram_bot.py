@@ -1263,12 +1263,32 @@ async def train_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 f"דיוק: {acc_pct}% ({correct}/{len(alerts)})"
             )
 
+        brain_section = ""
+        try:
+            from app.services.brain_logger import get_brain_stats, update_all_outcomes
+            update_all_outcomes()
+            stats = get_brain_stats()
+            if stats.get("total", 0) > 0:
+                brain_section = (
+                    f"\n{'─'*26}\n"
+                    f"מוח לומד\n"
+                    f"סה\"כ אינטראקציות: {stats['total']}\n"
+                    f"צ'אט: {stats['by_type'].get('chat',0)} | "
+                    f"סריקות: {stats['by_type'].get('scan',0)} | "
+                    f"התראות: {stats['by_type'].get('alert',0)}\n"
+                    f"דיוק תחזיות: {stats['accuracy']}% "
+                    f"({stats['correct']}/{stats['correct']+stats['incorrect']})"
+                )
+        except Exception:
+            pass
+
         msg = (
             f"✅ אימון הושלם!\n"
             f"{'─'*26}\n"
             f"{training_result}\n"
             f"{'─'*26}\n"
             f"{alerts_result}"
+            f"{brain_section}"
         )
 
         await update.message.reply_text(msg)

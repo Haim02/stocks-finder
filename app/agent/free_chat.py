@@ -679,6 +679,14 @@ class TradingAgent:
             # Self-improvement: learn from this conversation
             self.memory.learn_from_conversation(text, reply)
 
+        try:
+            from app.services.brain_logger import log_interaction
+            import re
+            found_tickers = re.findall(r'\b([A-Z]{2,5})\b', text)
+            log_interaction("chat", text, tickers=found_tickers[:5])
+        except Exception:
+            pass
+
         return reply
 
     # ── Learning ─────────────────────────────────────────────────────────────

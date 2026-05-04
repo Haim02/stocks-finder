@@ -49,15 +49,24 @@ class LearningEngine:
         url_type = self._detect_url_type(url)
 
         if url_type == "youtube":
-            return self._learn_from_youtube(url)
+            result = self._learn_from_youtube(url)
         elif url_type == "github":
-            return self._learn_from_github(url)
+            result = self._learn_from_github(url)
         elif url_type == "twitter":
-            return self._learn_from_twitter(url)
+            result = self._learn_from_twitter(url)
         elif url_type == "pdf":
-            return self._learn_from_pdf_url(url)
+            result = self._learn_from_pdf_url(url)
         else:
-            return self._learn_from_webpage(url)
+            result = self._learn_from_webpage(url)
+
+        if result.get("success"):
+            try:
+                from app.services.brain_logger import log_interaction
+                log_interaction("url", result.get("summary", url[:200]), metadata={"url": url, "topic": result.get("topic", "")})
+            except Exception:
+                pass
+
+        return result
 
     def _detect_url_type(self, url: str) -> str:
         url_lower = url.lower()
@@ -233,6 +242,12 @@ class LearningEngine:
             if self.memory:
                 self.memory.save_knowledge(topic, knowledge, source=source)
 
+            try:
+                from app.services.brain_logger import log_interaction
+                log_interaction("pdf", knowledge[:300], metadata={"source": source, "topic": topic})
+            except Exception:
+                pass
+
             return {
                 "success": True,
                 "topic": topic,
@@ -332,6 +347,13 @@ class LearningEngine:
                 topic = f"תמונה: {context[:30]}" if context else f"Image {datetime.now().strftime('%d/%m %H:%M')}"
                 self.memory.save_knowledge(topic, analysis, source="image")
                 saved = True
+
+            if saved:
+                try:
+                    from app.services.brain_logger import log_interaction
+                    log_interaction("image", analysis[:300], metadata={"context": context[:100]})
+                except Exception:
+                    pass
 
             return {
                 "success": True,

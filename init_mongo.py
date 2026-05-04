@@ -30,6 +30,7 @@ def init_db():
         ("training_events",            "timestamp",  90 * 24 * 3600),
         ("monitor_alerts_log",         "timestamp",   7 * 24 * 3600),
         ("alert_training_data",        "timestamp",   7 * 24 * 3600),
+        ("brain_training_data",        "timestamp",  90 * 24 * 3600),
     ]
     for collection, field, ttl in ttl_indexes:
         try:
@@ -45,6 +46,14 @@ def init_db():
             print(f"✅ Index '{field}' on 'alert_training_data'.")
         except Exception as e:
             print(f"⚠️ Index 'alert_training_data.{field}' info: {e}")
+
+    # brain_training_data — query indexes
+    for field in ["type", "tickers", "outcome"]:
+        try:
+            db["brain_training_data"].create_index(field)
+            print(f"✅ Index '{field}' on 'brain_training_data'.")
+        except Exception as e:
+            print(f"⚠️ Index 'brain_training_data.{field}' info: {e}")
 
     print("🚀 MongoDB setup complete!")
 
