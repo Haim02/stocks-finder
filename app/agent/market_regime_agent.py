@@ -457,23 +457,54 @@ def _build_hebrew_summary(report: MarketRegimeReport) -> str:
 
     timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
 
+    # PCR flat values for plain-text summary
+    pcr_val = 1.0
+    pcr_interpretation = "ניטרלי"
+    if pcr:
+        pcr_val = pcr.pcr if hasattr(pcr, 'pcr') else 1.0
+        if pcr_val > 1.2:
+            pcr_interpretation = "שוק פחדני — סימן קונטרריאני שורי"
+        elif pcr_val > 1.0:
+            pcr_interpretation = "קצת פחדני — נוטה לעלייה"
+        elif pcr_val < 0.7:
+            pcr_interpretation = "שוק חמדני — זהירות מירידה"
+
+    # Macro safe access (macro can be None)
+    macro_fed       = getattr(macro, 'fed_funds_rate',        5.25) if macro else 5.25
+    macro_cpi       = getattr(macro, 'cpi_yoy',               3.0)  if macro else 3.0
+    macro_curve     = getattr(macro, 'yield_curve',           0.0)  if macro else 0.0
+    macro_recession = getattr(macro, 'recession_probability', 20.0) if macro else 20.0
+
+    v_desc = {
+        "GREEN":  "מומלץ לפתוח פוזיציות היום",
+        "YELLOW": "סחר בזהירות, הקטן סיזינג",
+        "RED":    "לא מומלץ לפתוח פוזיציות חדשות היום",
+    }.get(verdict, verdict)
+
     return (
-        f"🧠 *Agent 1 — ניתוח שוק יומי*\n"
-        f"🕙 {timestamp} שעון ישראל\n"
-        f"{'━' * 28}\n\n"
-        f"{v_emoji} *ורדיקט: {v_text}*\n"
-        f"{reason_section}\n\n"
-        f"{'━' * 28}\n"
-        f"📊 *נתוני שוק:*\n"
-        f"• VIX: `{vix:.2f}` — {vix_note}\n"
-        f"  {vix_impact}\n"
-        f"• SPY: {spy_note}\n"
-        f"• IV Rank SPY: `{iv_rank:.1f}%` — {iv_note}\n"
-        f"  {iv_impact}\n"
-        f"• סנטימנט: `{sentiment:.1f}/10`"
-        f"{macro_section}"
-        f"{pcr_section}"
-        f"{perp_section}"
+        f"🧠 ניתוח שוק יומי — {timestamp}\n"
+        f"\n"
+        f"{'🟢 ירוק' if verdict == 'GREEN' else '🟡 צהוב' if verdict == 'YELLOW' else '🔴 אדום'} — {v_desc}\n"
+        f"\n"
+        f"מה זה אומר:\n"
+        f"{reason_section}\n"
+        f"\n"
+        f"מצב השוק:\n"
+        f"• VIX {vix:.1f} — {'שוק רגוע, סביבה טובה לאופציות' if vix < 20 else 'שוק תנודתי, הקטן גודל עסקאות' if vix < 25 else 'פחד בשוק — זהירות קיצונית'}\n"
+        f"• SPY {spy_note} | IV Rank {iv_rank:.0f}% — {'פרמיה אטרקטיבית למכירה' if iv_rank >= 50 else 'פרמיה בינונית' if iv_rank >= 25 else 'פרמיה נמוכה, לא כדאי למכור'}\n"
+        f"• סנטימנט שוק: {sentiment:.0f}/10\n"
+        f"\n"
+        f"מאקרו:\n"
+        f"• ריבית פד: {macro_fed:.2f}% — {'גבוהה, לחץ על שוק המניות' if macro_fed > 4.5 else 'מתונה, תומכת בשוק'}\n"
+        f"• אינפלציה: {macro_cpi:.1f}% — {'מעל יעד 2%, הפד לא ימהר להוריד ריבית' if macro_cpi > 2.5 else 'קרוב ליעד, סביבה חיובית'}\n"
+        f"• עקום תשואות: {'+' if macro_curve > 0 else ''}{macro_curve:.2f}% — {'כלכלה בריאה' if macro_curve > 0 else 'אות אזהרה למיתון'}\n"
+        f"• הסתברות מיתון: {macro_recession:.0f}%\n"
+        f"\n"
+        f"PCR (מדד סנטימנט אופציות):\n"
+        f"PCR = יחס בין קוני ה-Puts (מגנים) לקוני ה-Calls (ספקולנטים).\n"
+        f"• PCR מעל 1 = הציבור קונה הגנות = שוק פחדני = לרוב סימן שורי\n"
+        f"• PCR מתחת ל-0.8 = הציבור אופטימי מדי = סימן אזהרה\n"
+        f"• PCR עכשיו: {pcr_val:.2f} — {pcr_interpretation}\n"
     )
 
 

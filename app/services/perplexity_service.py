@@ -52,7 +52,7 @@ def _set_cache(query: str, result: str):
 @dataclass
 class PerplexityResearch:
     macro_events: str
-    fed_commentary: str
+    fed_commentary: str    # kept for backward compat — populated from macro_events
     market_sentiment: str
     sp500_risks: str
     raw_responses: dict
@@ -131,30 +131,40 @@ class PerplexityService:
             )
 
         logger.info("Running Perplexity morning research (4 queries)...")
+        from datetime import date as _dt
+        _today = _dt.today().strftime("%B %d, %Y")
         queries = {
             "macro_events": (
-                "What are the most significant macroeconomic events, data releases, "
-                "or central bank decisions happening today or this week that affect US stock markets?"
-            ),
-            "fed_commentary": (
-                "What has the Federal Reserve said most recently about interest rates, "
-                "inflation, or monetary policy? Any Fed officials speaking today?"
+                f"Today {_today}: What are KEY market-moving events? "
+                f"Include ONLY: actual Fed RATE DECISIONS (not speeches), "
+                f"CPI/NFP/GDP data releases with actual numbers, "
+                f"major geopolitical events (wars, sanctions, trade deals). "
+                f"SKIP: Fed member speeches, analyst opinions, rumors. "
+                f"If nothing major, say: nothing significant today."
             ),
             "market_sentiment": (
                 "What is the current US stock market sentiment today — "
-                "risk-on or risk-off? What are institutional investors doing?"
+                "risk-on or risk-off? What are institutional investors doing? "
+                "Include VIX level and any unusual options activity."
             ),
             "sp500_risks": (
                 "Are there any major negative news events, geopolitical risks, "
-                "or earnings surprises today that could significantly impact the S&P 500?"
+                "or earnings surprises today that could significantly impact the S&P 500? "
+                "SKIP analyst opinions and Fed speech summaries."
+            ),
+            "earnings_today": (
+                f"Which major US companies are reporting earnings today {_today}? "
+                f"List ticker, EPS estimate, and any pre-market reaction. "
+                f"Focus on S&P 500 names."
             ),
         }
         raw = {key: self.search(q, max_chars=600) for key, q in queries.items()}
         logger.info("Perplexity morning research complete (%d chars total)",
                     sum(len(v) for v in raw.values()))
+        macro_ev = raw.get("macro_events", "")
         return PerplexityResearch(
-            macro_events=raw.get("macro_events", ""),
-            fed_commentary=raw.get("fed_commentary", ""),
+            macro_events=macro_ev,
+            fed_commentary=macro_ev,   # backward compat alias
             market_sentiment=raw.get("market_sentiment", ""),
             sp500_risks=raw.get("sp500_risks", ""),
             raw_responses=raw,
@@ -196,13 +206,16 @@ class PerplexityService:
         )
 
     def get_macro_today(self) -> str:
-        """Today's macro events."""
+        """Today's KEY macro events — rate decisions and data releases only."""
         from datetime import date
         today = date.today().strftime("%B %d, %Y")
         return self.search(
-            f"Today is {today}. What are the key macro events happening today? "
-            f"Fed speakers, economic data releases (CPI, PPI, jobs), "
-            f"Treasury auctions, major earnings. Be specific with times."
+            f"Today {today}: What are the KEY market-moving events? "
+            f"Include ONLY: actual Fed RATE DECISIONS (not speeches), "
+            f"CPI/NFP/GDP data releases with numbers, "
+            f"major geopolitical events (wars, sanctions, trade deals). "
+            f"SKIP: Fed member speeches, analyst opinions, rumors. "
+            f"If nothing major, say: אין אירועים מרכזיים היום"
         )
 
     def get_options_flow(self, ticker: str) -> str:

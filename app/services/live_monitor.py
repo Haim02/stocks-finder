@@ -496,22 +496,34 @@ async def send_morning_briefing():
     today_str  = date.today().strftime("%B %d, %Y")
     events_raw = await asyncio.to_thread(
         _search_perplexity,
-        f"Key market events today {today_str}: "
-        f"major earnings reports, economic data (CPI/NFP/GDP), "
-        f"Fed rate decisions only (not speeches). "
-        f"List only what's actually happening today.",
+        f"Today {today_str}: KEY market-moving events only. "
+        f"Include: actual Fed RATE DECISIONS (not speeches), "
+        f"CPI/NFP/GDP releases with numbers, major earnings (EPS vs estimate), "
+        f"geopolitical events. SKIP Fed speeches, analyst opinions, rumors. "
+        f"If nothing major, say: nothing significant.",
     )
-    events_heb = (
-        await asyncio.to_thread(_translate_to_hebrew, events_raw)
-        if events_raw else "אין אירועים מרכזיים היום"
-    )
+
+    if events_raw and "nothing significant" not in events_raw.lower() and "nothing major" not in events_raw.lower():
+        events_heb = await asyncio.to_thread(_translate_to_hebrew, events_raw)
+        impact_lines = ""
+        if "NFP" in events_raw or "payroll" in events_raw.lower() or "nonfarm" in events_raw.lower():
+            impact_lines += "• NFP = נתון תעסוקה חשוב — תנועה חדה צפויה ב-SPY\n"
+        if "CPI" in events_raw:
+            impact_lines += "• CPI = אינפלציה — משפיע על החלטות הפד\n"
+        if "GDP" in events_raw:
+            impact_lines += "• GDP = צמיחה כלכלית — מראה כוח/חולשה של הכלכלה\n"
+        if "rate" in events_raw.lower() and "decision" in events_raw.lower():
+            impact_lines += "• החלטת ריבית — תנועה חדה מאוד צפויה\n"
+        events_final = events_heb + (f"\n\nאיך זה משפיע:\n{impact_lines}" if impact_lines else "")
+    else:
+        events_final = "אין אירועים מרכזיים היום — שוק רגיל"
 
     msg = (
         f"🌅 *בוקר טוב חיים! — {day_name} {today}*\n"
         f"──────────────────────────\n\n"
         f"📊 *שווקים:*\n{market_text}\n\n"
         f"──────────────────────────\n"
-        f"📅 *היום לשים לב:*\n{events_heb}\n\n"
+        f"📅 *היום לשים לב:*\n{events_final}\n\n"
         f"──────────────────────────\n"
         f"/regime — ניתוח מלא | /strategist — עסקאות"
     )

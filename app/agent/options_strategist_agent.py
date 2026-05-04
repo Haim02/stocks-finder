@@ -60,7 +60,7 @@ COOLDOWN_DAYS     = 5     # skip tickers sent in last N days
 FINAL_TOP_N       = 3     # max trade ideas to send
 
 # 7-step thresholds — loosened to let more stocks through
-MIN_IV_RANK       = 20    # was 25 — IV Rank 20%+ is enough
+MIN_IV_RANK       = 15    # was 20 — lower to let more opportunities through
 PREFERRED_IV_RANK = 35    # preferred threshold (Tastytrade ideal)
 MIN_IV_PCT        = 35    # was 50 — less strict dual confirmation
 TARGET_DELTA_LOW  = 0.15
@@ -497,9 +497,17 @@ def _build_hebrew_summary(report: OptionsStrategistReport) -> str:
             f"👨‍💼 *Agent 2 — Options Strategist*\n"
             f"🕙 {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
             f"{verdict_emoji} Regime: {report.verdict_used}\n\n"
-            f"😴 לא נמצאו עסקאות העומדות בכל 7 הקריטריונים היום.\n"
-            f"סרקתי {report.candidates_scanned} מניות, "
-            f"{report.candidates_passed} עברו את הסינון הראשוני."
+            f"לא נמצאו עסקאות היום לאחר סריקת {report.candidates_scanned} מניות.\n"
+            f"\n"
+            f"הסיבות האפשריות:\n"
+            f"• Regime {report.verdict_used} — דרישות מחמירות יותר\n"
+            f"• IV נמוך בשוק — פרמיה לא מספיקה לעסקאות איכותיות\n"
+            f"• שוק יציב = פרמיות נמוכות = קשה לעמוד בסינון\n"
+            f"\n"
+            f"מה לעשות:\n"
+            f"• שלח /ivscan למצוא מניות עם IV גבוה יותר\n"
+            f"• שלח /zerod להזדמנויות 0DTE\n"
+            f"• המתן ל-Regime ירוק לעסקאות טובות יותר"
         )
 
     cards = "\n\n".join(
