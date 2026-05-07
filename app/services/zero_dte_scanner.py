@@ -206,6 +206,25 @@ def analyze_zero_dte(symbol: str = "SPY") -> Optional[ZeroDTESetup]:
         put_strike = round(price - daily_em * cushion, 0)
         call_strike = round(price + daily_em * cushion, 0)
 
+        # Respect GEX levels — never sell above Call Resistance or below Put Support
+        gex_note = ""
+        try:
+            from app.services.barchart_gex import get_gex_for_zerod
+            gex_levels = get_gex_for_zerod(symbol)
+            if gex_levels:
+                gex_call_max = gex_levels.get("max_safe_call_strike", 0)
+                gex_put_min = gex_levels.get("min_safe_put_strike", 0)
+                if gex_call_max > 0 and call_strike > gex_call_max:
+                    call_strike = gex_call_max
+                if gex_put_min > 0 and put_strike < gex_put_min:
+                    put_strike = gex_put_min
+                gex_note = (
+                    f"GEX Range: {gex_levels['intraday_range']} | "
+                    f"Regime: {gex_levels['gamma_regime']}"
+                )
+        except Exception:
+            pass
+
         # Calculate deltas
         put_delta = _calc_delta_approx(price, put_strike, iv, "put")
         call_delta = _calc_delta_approx(price, call_strike, iv, "call")
@@ -235,7 +254,7 @@ def analyze_zero_dte(symbol: str = "SPY") -> Optional[ZeroDTESetup]:
             call_strike=call_strike,
             expiration=date.today().isoformat(),
             sizing_note=sizing,
-            timing_note=timing,
+            timing_note=f"{timing}\n{gex_note}" if gex_note else timing,
             risk_level=risk,
             put_delta=round(put_delta, 3),
             call_delta=round(call_delta, 3),

@@ -478,6 +478,19 @@ class TradingAgent:
             except Exception:
                 pass
 
+        # ── 8. Axios RSS — real-time market headlines ─────────────────────────
+        if any(w in text_lower for w in ["חדשות", "news", "axios", "היום", "עדכון"]):
+            try:
+                from app.services.news_alert_engine import _fetch_axios_rss
+                axios_news = _fetch_axios_rss()
+                if axios_news:
+                    top_headlines = "\n".join(
+                        f"• {a['title']}" for a in axios_news[:5]
+                    )
+                    parts.append(f"[חדשות Axios — עכשיו]\n{top_headlines}")
+            except Exception:
+                pass
+
         return "\n\n".join(parts)
 
     # ── Context Builder ──────────────────────────────────────────────────────

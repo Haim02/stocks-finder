@@ -304,3 +304,43 @@ def format_gex_hebrew(g: GEXResult) -> str:
         f"──────────────────────────\n"
         f"🎯 *השלכה אסטרטגית:*\n{g.strategy_implication}"
     )
+
+
+
+def get_best_gex(symbol: str = "SPY") -> Optional[GEXResult]:
+    """
+    Try Barchart real-time first, fall back to our own calculation.
+    This is the main function to use everywhere.
+    """
+    try:
+        from app.services.barchart_gex import get_realtime_gex
+
+        bc_gex = get_realtime_gex(symbol)
+        if bc_gex and bc_gex.call_resistance > 0:
+            return GEXResult(
+                symbol=symbol,
+                spot_price=bc_gex.spot_price,
+                calculation_time=bc_gex.timestamp,
+                zero_gamma=bc_gex.hvl,
+                call_wall=bc_gex.call_resistance,
+                put_wall=bc_gex.put_support,
+                vol_trigger=bc_gex.hvl,
+                net_gex=bc_gex.net_gex,
+                gamma_regime=bc_gex.gamma_regime,
+                regime_note="מקור: Barchart.com (זמן אמת)",
+                dist_to_call_wall=round((bc_gex.call_resistance / bc_gex.spot_price - 1) * 100, 2) if bc_gex.spot_price else 0,
+                dist_to_put_wall=round((bc_gex.put_support / bc_gex.spot_price - 1) * 100, 2) if bc_gex.spot_price else 0,
+                dist_to_zero_gamma=round((bc_gex.hvl / bc_gex.spot_price - 1) * 100, 2) if bc_gex.spot_price else 0,
+                strikes=bc_gex.strikes,
+                gex_profile=bc_gex.gex_values,
+                interpretation=bc_gex.put_wall_note,
+                strategy_implication=(
+                    "מכור פרמיה: Iron Condor / Bull Put Spread"
+                    if bc_gex.gamma_regime == "POSITIVE"
+                    else "זהירות! שוק תנודתי — הקטן פוזיציות"
+                ),
+            )
+    except Exception as e:
+        logger.debug("Barchart GEX failed, using yfinance: %s", e)
+
+    return calculate_gex(symbol)

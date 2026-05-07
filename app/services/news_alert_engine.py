@@ -412,7 +412,16 @@ async def run_news_scan_job() -> list[NewsAlert]:
     watchlist = _get_watchlist()
     logger.info("[NewsAlert] Scanning %d tickers: %s", len(watchlist), watchlist)
 
+    # First: Axios RSS (fast, free, no rate limit)
     alerts = []
+    try:
+        axios_alerts = await _scan_axios_feeds()
+        alerts.extend(axios_alerts)
+        if axios_alerts:
+            logger.info("[NewsAlert] Axios: %d alerts", len(axios_alerts))
+    except Exception as e:
+        logger.warning("[NewsAlert] Axios scan failed: %s", e)
+
     for ticker in watchlist:
         try:
             alert = await scan_news_for_ticker(ticker)
@@ -433,3 +442,125 @@ def run_news_scan_sync() -> None:
         asyncio.run(run_news_scan_job())
     except Exception as e:
         logger.error("[NewsAlert] run_news_scan_sync failed: %s", e)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Axios RSS — free real-time market news
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _fetch_axios_rss() -> list[dict]:
+    """
+    Fetch latest financial news from Axios RSS feeds.
+    Free, no API key needed.
+    Returns list of {title, summary, url, published, source}
+    """
+    import requests
+    from xml.etree import ElementTree as ET
+
+    AXIOS_FEEDS = [
+        "https://www.axios.com/feeds/feed.rss",
+        "https://api.axios.com/feed/business",
+        "https://api.axios.com/feed/markets",
+        "https://api.axios.com/feed/economy",
+    ]
+
+    articles = []
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)"}
+
+    for feed_url in AXIOS_FEEDS:
+        try:
+            resp = requests.get(feed_url, headers=headers, timeout=8)
+            if resp.status_code != 200:
+                continue
+
+            root = ET.fromstring(resp.content)
+            channel = root.find("channel")
+            if not channel:
+                continue
+
+            for item in channel.findall("item")[:5]:
+                title = item.findtext("title", "")
+                desc = item.findtext("description", "")
+                url = item.findtext("link", "")
+                pub_date = item.findtext("pubDate", "")
+
+                if title:
+                    articles.append({
+                        "title": title,
+                        "summary": desc[:200] if desc else "",
+                        "url": url,
+                        "published": pub_date,
+                        "source": "Axios",
+                    })
+
+        except Exception as e:
+            logger.debug("Axios RSS feed failed (%s): %s", feed_url, e)
+
+    return articles
+
+
+async def _scan_axios_feeds() -> list[NewsAlert]:
+    """Scan Axios RSS for high-value market catalysts and send alerts."""
+    articles = await asyncio.to_thread(_fetch_axios_rss)
+    alerts = []
+
+    for article in articles:
+        title = article.get("title", "")
+        summary = article.get("summary", "")
+        full_text = f"{title} {summary}"
+
+        catalyst_type, score = _detect_catalyst_type(full_text)
+        if score < ALERT_THRESHOLD:
+            continue
+
+        if _is_duplicate("AXIOS", title):
+            continue
+
+        expected_move, magnitude = _estimate_move(catalyst_type, score)
+
+        alert = NewsAlert(
+            ticker="MARKET",
+            headline=title[:200],
+            catalyst_type=catalyst_type,
+            catalyst_score=score,
+            expected_move=expected_move,
+            magnitude=magnitude,
+            action_recommendation="עקוב אחרי ההשפעה על SPY / הסקטור",
+            iv_rank=0.0,
+            source="Axios",
+            raw_text=full_text[:400],
+        )
+
+        # Custom message for Axios (market-level, no ticker)
+        magnitude_emoji = {"HIGH": "🚨", "MEDIUM": "⚠️", "LOW": "ℹ️"}.get(magnitude, "📰")
+        score_bar = "🔥" * min(5, score // 20)
+        text = (
+            f"{magnitude_emoji} *Axios — חדשות שוק*\n"
+            f"──────────────────────────\n"
+            f"📰 *{title[:120]}*\n\n"
+            f"🎯 *Catalyst:* `{catalyst_type}`\n"
+            f"💥 *Score:* `{score}/100` {score_bar}\n"
+            + (f"\n{summary[:150]}\n" if summary else "") +
+            f"\n💡 קרא עוד: {article.get('url', '')}"
+        )
+
+        from app.core.config import settings
+        import aiohttp
+        url_tg = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+        try:
+            async with aiohttp.ClientSession() as session:
+                await session.post(url_tg, json={
+                    "chat_id": settings.TELEGRAM_CHAT_ID,
+                    "text": text,
+                    "parse_mode": "Markdown",
+                    "disable_web_page_preview": True,
+                }, timeout=aiohttp.ClientTimeout(total=10))
+        except Exception as e:
+            logger.error("Axios alert send failed: %s", e)
+            continue
+
+        _log_alert(alert)
+        logger.info("Axios alert sent: %s (score=%d)", title[:60], score)
+        alerts.append(alert)
+
+    return alerts

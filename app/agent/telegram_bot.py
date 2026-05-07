@@ -1562,34 +1562,30 @@ def _run_gex_sync(ticker: str, max_dte: int) -> str:
 
 
 async def gex_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show GEX analysis (SpotGamma methodology) + A/D Line: /gex [TICKER]"""
+    """Show real-time GEX from Barchart (fallback: yfinance) + A/D Line: /gex [TICKER]"""
     if not _is_authorized(update):
         return
 
     symbol = context.args[0].upper() if context.args else "SPY"
-    await update.message.reply_text(
-        f"📊 מחשב GEX ל-*{symbol}*...\n"
-        f"_סורק שרשרת אופציות + מחשב Zero Gamma, Call Wall, Put Wall (כ-30 שניות)_",
-        parse_mode="Markdown",
-    )
+    await update.message.reply_text(f"📊 שולף GEX בזמן אמת ל-{symbol}...")
 
     try:
-        from app.services.gex_calculator import calculate_gex, format_gex_hebrew
+        from app.services.barchart_gex import get_realtime_gex, format_gex_realtime_hebrew
         from app.services.advance_decline import get_ad_line, format_ad_line_hebrew
 
         gex, ad = await asyncio.gather(
-            asyncio.to_thread(lambda: calculate_gex(symbol)),
+            asyncio.to_thread(lambda: get_realtime_gex(symbol)),
             asyncio.to_thread(get_ad_line),
         )
 
         if gex:
-            msg = format_gex_hebrew(gex)
+            msg = format_gex_realtime_hebrew(gex)
             try:
                 await update.message.reply_text(msg, parse_mode="Markdown")
             except Exception:
                 await update.message.reply_text(msg)
         else:
-            await update.message.reply_text(f"⚠️ לא הצלחתי לחשב GEX ל-{symbol}")
+            await update.message.reply_text(f"⚠️ לא הצלחתי לשלוף GEX ל-{symbol}")
 
         if ad:
             msg = format_ad_line_hebrew(ad)

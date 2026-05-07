@@ -529,10 +529,26 @@ async def send_morning_briefing():
     else:
         events_final = "אין אירועים מרכזיים היום — שוק רגיל"
 
+    gex_line = ""
+    try:
+        from app.services.barchart_gex import get_realtime_gex
+        spy_gex = get_realtime_gex("SPY")
+        if spy_gex:
+            gex_line = (
+                f"\n📐 GEX Levels:\n"
+                f"🔴 התנגדות: ${spy_gex.call_resistance:,.0f} | "
+                f"⚡ Gamma Flip: ${spy_gex.hvl:,.0f} | "
+                f"🟢 תמיכה: ${spy_gex.put_support:,.0f}\n"
+                f"Regime: {'🟢 Positive — מכור פרמיה' if spy_gex.gamma_regime == 'POSITIVE' else '🔴 Negative — זהירות'}"
+            )
+    except Exception:
+        pass
+
     msg = (
         f"🌅 *בוקר טוב חיים! — {day_name} {today}*\n"
         f"──────────────────────────\n\n"
-        f"📊 *שווקים:*\n{market_text}\n\n"
+        f"📊 *שווקים:*\n{market_text}"
+        f"{gex_line}\n\n"
         f"──────────────────────────\n"
         f"📅 *היום לשים לב:*\n{events_final}\n\n"
         f"──────────────────────────\n"

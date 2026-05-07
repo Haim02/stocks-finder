@@ -281,6 +281,19 @@ def _calculate_verdict(
             red_signals,
         )
 
+    # GEX regime check — negative gamma = volatile market
+    try:
+        from app.services.barchart_gex import get_realtime_gex
+        gex = get_realtime_gex("SPY")
+        if gex and gex.gamma_regime == "NEGATIVE" and verdict == "GREEN":
+            verdict = "YELLOW"
+            logger.info(
+                "Verdict downgraded GREEN→YELLOW — GEX negative "
+                "(SPY below Gamma Flip $%.0f)", gex.hvl
+            )
+    except Exception:
+        pass
+
     logger.info(
         "Verdict: %s | VIX=%.1f | risk_words=%d | spy=%s | "
         "yield_curve=%.2f | red_signals=%d",
