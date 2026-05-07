@@ -68,6 +68,15 @@ class GEXResult:
     strategy_implication: str
 
 
+def _safe_oi(val) -> int:
+    """Convert openInterest to int, safely handling NaN from yfinance."""
+    try:
+        v = float(val or 0)
+        return int(v) if v == v else 0  # v == v is False for NaN
+    except (TypeError, ValueError):
+        return 0
+
+
 def _black_scholes_gamma(S: float, K: float, T: float,
                           r: float, sigma: float) -> float:
     """Calculate option gamma using Black-Scholes."""
@@ -120,7 +129,9 @@ def calculate_gex(symbol: str = "SPY") -> Optional[GEXResult]:
 
                 for _, row in chain.calls.iterrows():
                     K = float(row.get("strike", 0))
-                    oi = int(row.get("openInterest", 0) or 0)
+                    oi = _safe_oi(row.get("openInterest", 0))
+                    vol = _safe_oi(row.get("volume", 0))
+                    oi = oi if oi > 0 else vol   # volume as fallback when OI not yet updated
                     iv = float(row.get("impliedVolatility", 0.3) or 0.3)
                     if K <= 0 or oi == 0 or iv <= 0:
                         continue
@@ -133,7 +144,9 @@ def calculate_gex(symbol: str = "SPY") -> Optional[GEXResult]:
 
                 for _, row in chain.puts.iterrows():
                     K = float(row.get("strike", 0))
-                    oi = int(row.get("openInterest", 0) or 0)
+                    oi = _safe_oi(row.get("openInterest", 0))
+                    vol = _safe_oi(row.get("volume", 0))
+                    oi = oi if oi > 0 else vol   # volume as fallback when OI not yet updated
                     iv = float(row.get("impliedVolatility", 0.3) or 0.3)
                     if K <= 0 or oi == 0 or iv <= 0:
                         continue
@@ -175,14 +188,14 @@ def calculate_gex(symbol: str = "SPY") -> Optional[GEXResult]:
                     chain = stock.option_chain(exp)
                     for _, row in chain.calls.iterrows():
                         K = float(row.get("strike", 0))
-                        oi = int(row.get("openInterest", 0) or 0)
+                        oi = _safe_oi(row.get("openInterest", 0)) or _safe_oi(row.get("volume", 0))
                         iv = float(row.get("impliedVolatility", 0.3) or 0.3)
                         if K <= 0 or oi == 0:
                             continue
                         scenario_gex += _black_scholes_gamma(price_scenario, K, T, r, iv) * oi * 100 * (price_scenario ** 2) * 0.01
                     for _, row in chain.puts.iterrows():
                         K = float(row.get("strike", 0))
-                        oi = int(row.get("openInterest", 0) or 0)
+                        oi = _safe_oi(row.get("openInterest", 0)) or _safe_oi(row.get("volume", 0))
                         iv = float(row.get("impliedVolatility", 0.3) or 0.3)
                         if K <= 0 or oi == 0:
                             continue
