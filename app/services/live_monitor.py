@@ -560,27 +560,102 @@ async def send_morning_briefing():
 
 
 async def send_evening_summary():
-    """Send evening summary at 22:30 Israel time."""
+    """Send evening summary in Hebrew with market impact."""
+    from datetime import date
+    import yfinance as yf
+
     today = date.today().strftime("%d/%m/%Y")
 
-    summary_raw = await asyncio.to_thread(
-        _search_perplexity,
-        "Top 3 stock market moves today and why. "
-        "What should traders watch tomorrow? Be brief.",
-    )
-    summary_heb = (
-        await asyncio.to_thread(_translate_to_hebrew, summary_raw)
-        if summary_raw else "אין סיכום זמין"
+    # Get actual price data for today's moves
+    market_lines = []
+    for symbol, label in [("SPY","SPY"), ("QQQ","QQQ"), ("^VIX","VIX")]:
+        try:
+            hist = yf.Ticker(symbol).history(period="2d")
+            if not hist.empty and len(hist) >= 2:
+                price = float(hist["Close"].iloc[-1])
+                prev = float(hist["Close"].iloc[-2])
+                chg = (price / prev - 1) * 100
+                emoji = "📈" if chg >= 0 else "📉"
+                market_lines.append(
+                    f"{emoji} {label}: {chg:+.1f}% | ${price:,.2f}"
+                )
+        except Exception:
+            continue
+
+    market_text = "\n".join(market_lines) if market_lines else ""
+
+    # Get top movers — real data
+    top_movers = []
+    sp500_sample = [
+        "AAPL","MSFT","NVDA","AMZN","META","GOOGL",
+        "TSLA","AMD","PLTR","COIN","JPM","XOM"
+    ]
+    for ticker in sp500_sample:
+        try:
+            hist = yf.Ticker(ticker).history(period="2d")
+            if not hist.empty and len(hist) >= 2:
+                price = float(hist["Close"].iloc[-1])
+                prev = float(hist["Close"].iloc[-2])
+                chg = (price / prev - 1) * 100
+                if abs(chg) >= 2.0:
+                    top_movers.append((ticker, chg, price))
+        except Exception:
+            continue
+
+    top_movers.sort(key=lambda x: abs(x[1]), reverse=True)
+
+    movers_text = ""
+    if top_movers:
+        movers_lines = []
+        for ticker, chg, price in top_movers[:4]:
+            emoji = "📈" if chg > 0 else "📉"
+            movers_lines.append(f"{emoji} {ticker}: {chg:+.1f}% | ${price:,.2f}")
+        movers_text = "\n".join(movers_lines)
+
+    # Get explanation + tomorrow events via Perplexity — IN HEBREW
+    explanation_raw = _search_perplexity(
+        f"תאריך היום: {date.today().strftime('%B %d, %Y')}. "
+        f"תן לי בעברית: "
+        f"1) מה הניע את שוק המניות היום — 2-3 משפטים קצרים "
+        f"2) מה לשים לב מחר — אירועים, נתונים כלכליים, earnings "
+        f"אל תכתוב אנגלית. רק עברית."
     )
 
-    msg = (
-        f"🌙 *סיכום יום — {today}*\n"
-        f"──────────────────────────\n\n"
-        f"{summary_heb}"
-    )
+    # Force translate if still English
+    if explanation_raw:
+        hebrew_chars = sum(1 for c in explanation_raw if 'א' <= c <= 'ת')
+        if hebrew_chars / max(len(explanation_raw), 1) < 0.3:
+            explanation_raw = _translate_to_hebrew(explanation_raw)
 
-    await _send_alert(msg)
-    logger.info("Evening summary sent")
+    # Build message
+    msg_parts = [f"🌙 סיכום יום — {today}\n{'━'*26}"]
+
+    if market_text:
+        msg_parts.append(f"\nשווקים:\n{market_text}")
+
+    if movers_text:
+        msg_parts.append(f"\nמניות שזזו היום:\n{movers_text}")
+
+    if explanation_raw:
+        msg_parts.append(f"\n{'━'*26}\n{explanation_raw}")
+    else:
+        # Fallback — build from actual data
+        spy_line = market_lines[0] if market_lines else ""
+        if "📈" in spy_line:
+            msg_parts.append(
+                f"\n{'━'*26}\n"
+                f"השוק סגר בעלייה היום.\n"
+                f"מחר: עקוב אחרי חדשות לפני פתיחה."
+            )
+        elif "📉" in spy_line:
+            msg_parts.append(
+                f"\n{'━'*26}\n"
+                f"השוק סגר בירידה היום.\n"
+                f"מחר: שים לב לרמות תמיכה ב-GEX."
+            )
+
+    await _send_alert("\n".join(msg_parts))
+    logger.info("Evening summary sent in Hebrew")
 
 
 # ── Sync wrappers for APScheduler ─────────────────────────────────────────────
