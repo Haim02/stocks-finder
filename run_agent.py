@@ -273,6 +273,42 @@ def run_daemon() -> None:
     except ImportError:
         logger.warning("live_monitor not available — smart alert jobs skipped")
 
+    # ── Breaking News Scanner — every 5 min, Mon-Fri 16:30-23:00 Israel ─────
+    try:
+        from app.services.breaking_news_scanner import scan_breaking_news_sync
+
+        scheduler.add_job(
+            scan_breaking_news_sync,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour="16-22",
+                minute="*/5",
+                timezone=SCAN_TZ,
+            ),
+            id="breaking_news_5min",
+            name="Breaking News Scan — every 5min (16:30–23:00 Israel)",
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
+
+        # Extra job at market open (16:30 Israel = US open)
+        scheduler.add_job(
+            scan_breaking_news_sync,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour=16,
+                minute=30,
+                timezone=SCAN_TZ,
+            ),
+            id="market_open_scan",
+            name="Breaking News — Market Open (16:30 Israel)",
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
+        logger.info("Breaking news scanner scheduled: every 5min, 16:30–23:00 Israel (Mon–Fri)")
+    except ImportError:
+        logger.warning("breaking_news_scanner not available — breaking news jobs skipped")
+
     scheduler.start()
 
     next_run = scheduler.get_job("morning_pipeline").next_run_time
