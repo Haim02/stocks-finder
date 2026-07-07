@@ -1599,6 +1599,74 @@ async def gex_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(f"⚠️ שגיאה: {e}")
 
 
+async def dex_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show DEX (Delta Exposure) support/resistance levels: /dex [SYMBOL]"""
+    if not _is_authorized(update):
+        return
+
+    symbol = context.args[0].upper() if context.args else "SPX"
+    await update.message.reply_text(f"⚡ מחשב DEX — תמיכות/התנגדויות Delta ל-{symbol}...")
+
+    try:
+        from app.services.dex_analyzer import calculate_dex, format_dex_hebrew
+
+        result = await asyncio.to_thread(calculate_dex, symbol)
+        if result:
+            msg = format_dex_hebrew(result)
+            try:
+                await update.message.reply_text(msg, parse_mode="Markdown")
+            except Exception:
+                await update.message.reply_text(msg)
+        else:
+            await update.message.reply_text(f"⚠️ לא הצלחתי לחשב DEX ל-{symbol}")
+
+    except Exception as e:
+        logger.exception("dex_command failed for %s", symbol)
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
+async def nlm_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Query Haim's NotebookLM library directly: /nlm <question>"""
+    if not _is_authorized(update):
+        return
+
+    question = " ".join(context.args) if context.args else ""
+    if not question:
+        await update.message.reply_text(
+            "📓 *שימוש:* `/nlm <שאלה>`\n"
+            "שואל ישירות את ספריית NotebookLM שלך "
+            "(GEX, SpotGamma, Footprint, ATAS, 0DTE ועוד)",
+            parse_mode="Markdown",
+        )
+        return
+
+    await update.message.reply_text("📓 שואל את NotebookLM... (עד דקה)")
+
+    try:
+        from app.services.notebooklm_service import ask_notebook, format_nlm_hebrew, is_available
+
+        if not is_available():
+            await update.message.reply_text(
+                "⚠️ NotebookLM CLI לא זמין בסביבה הזו.\n"
+                "הידע המיובא עדיין זמין — פשוט שאל אותי ישירות."
+            )
+            return
+
+        result = await asyncio.to_thread(ask_notebook, question)
+        if result:
+            msg = format_nlm_hebrew(result, question)
+            try:
+                await update.message.reply_text(msg, parse_mode="Markdown")
+            except Exception:
+                await update.message.reply_text(msg)
+        else:
+            await update.message.reply_text("⚠️ לא קיבלתי תשובה מ-NotebookLM")
+
+    except Exception as e:
+        logger.exception("nlm_command failed")
+        await update.message.reply_text(f"⚠️ שגיאה: {e}")
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = """🤖 *HAI — סוכן מסחר AI*
 
@@ -1616,6 +1684,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 /ivscan — IV גבוה
 /chainscreen — Chain Screener
 /gex — GEX + A/D Line
+/dex — תמיכות/התנגדויות Delta
 
 ━━━━━━━━━━━━━━━━━━━━━━
 📺 *TradingView*
@@ -1641,6 +1710,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 /memory — היסטוריית שיחות
 /summary — סיכום שבועי
 /knowledge — ידע שנלמד
+/nlm — שאל את NotebookLM
 /learn_url — למד מקישור
 /learn — הוסף ידע
 /settings — הגדרות
@@ -1666,8 +1736,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 🔔 *אוטומטי:*
 🌅 09:00 דוח בוקר
-⚡ כל 15 דקות סריקה
-🌙 23:30 סיכום יום"""
+📊 16:25 רמות GEX ליום (לפני פתיחת וול-סטריט)
+⚡ כל 30 דק' — ניטור DEX (תמיכות/התנגדויות Delta)
+📰 כל 5 דק' — Breaking News (16:30–23:00)
+🌙 22:30 סיכום יום"""
 
     await update.message.reply_text(msg, parse_mode="Markdown")
 
@@ -2822,6 +2894,8 @@ def build_app() -> Application:
 
     # ── GEX — SpotGamma methodology (replaces old conversation handler) ──────
     app.add_handler(CommandHandler("gex", gex_command))
+    app.add_handler(CommandHandler("dex", dex_command))
+    app.add_handler(CommandHandler("nlm", nlm_command))
 
     # ── Core ──────────────────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",        cmd_start))

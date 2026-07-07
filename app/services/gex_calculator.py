@@ -120,46 +120,44 @@ def calculate_gex(symbol: str = "SPY") -> Optional[GEXResult]:
 
         expirations = stock.options[:4]  # nearest 4 expirations
 
+        # Each chain is fetched from the network exactly ONCE and flattened to
+        # (K, oi, iv, T, is_call) rows — reused later by the Zero-Gamma scan.
+        chain_rows: dict[str, list] = {}
+
         for exp in expirations:
             exp_date = date.fromisoformat(exp)
             T = max((exp_date - today).days / 365, 1 / 365)
 
             try:
                 chain = stock.option_chain(exp)
-
-                for _, row in chain.calls.iterrows():
-                    K = float(row.get("strike", 0))
-                    oi = _safe_oi(row.get("openInterest", 0))
-                    vol = _safe_oi(row.get("volume", 0))
-                    oi = oi if oi > 0 else vol   # volume as fallback when OI not yet updated
-                    iv = float(row.get("impliedVolatility", 0.3) or 0.3)
-                    if K <= 0 or oi == 0 or iv <= 0:
-                        continue
-                    if abs(K - spot) / spot > 0.15:
-                        continue
-                    gamma = _black_scholes_gamma(spot, K, T, r, iv)
-                    gex_b = gamma * oi * 100 * (spot ** 2) * 0.01 / 1e9
-                    strike_gex[K] = strike_gex.get(K, 0) + gex_b
-                    call_gex_by_strike[K] = call_gex_by_strike.get(K, 0) + gex_b
-
-                for _, row in chain.puts.iterrows():
-                    K = float(row.get("strike", 0))
-                    oi = _safe_oi(row.get("openInterest", 0))
-                    vol = _safe_oi(row.get("volume", 0))
-                    oi = oi if oi > 0 else vol   # volume as fallback when OI not yet updated
-                    iv = float(row.get("impliedVolatility", 0.3) or 0.3)
-                    if K <= 0 or oi == 0 or iv <= 0:
-                        continue
-                    if abs(K - spot) / spot > 0.15:
-                        continue
-                    gamma = _black_scholes_gamma(spot, K, T, r, iv)
-                    gex_b = gamma * oi * 100 * (spot ** 2) * 0.01 / 1e9
-                    strike_gex[K] = strike_gex.get(K, 0) - gex_b  # NEGATIVE
-                    put_gex_by_strike[K] = put_gex_by_strike.get(K, 0) + gex_b
-
             except Exception as e:
                 logger.debug("GEX chain failed for %s %s: %s", symbol, exp, e)
                 continue
+
+            rows: list = []
+            for df, is_call in ((chain.calls, True), (chain.puts, False)):
+                for _, row in df.iterrows():
+                    K = float(row.get("strike", 0))
+                    oi = _safe_oi(row.get("openInterest", 0))
+                    vol = _safe_oi(row.get("volume", 0))
+                    oi = oi if oi > 0 else vol   # volume as fallback when OI not yet updated
+                    iv = float(row.get("impliedVolatility", 0.3) or 0.3)
+                    if K <= 0 or oi == 0 or iv <= 0:
+                        continue
+                    rows.append((K, oi, iv, T, is_call))
+            chain_rows[exp] = rows
+
+            for K, oi, iv, T_row, is_call in rows:
+                if abs(K - spot) / spot > 0.15:
+                    continue
+                gamma = _black_scholes_gamma(spot, K, T_row, r, iv)
+                gex_b = gamma * oi * 100 * (spot ** 2) * 0.01 / 1e9
+                if is_call:
+                    strike_gex[K] = strike_gex.get(K, 0) + gex_b
+                    call_gex_by_strike[K] = call_gex_by_strike.get(K, 0) + gex_b
+                else:
+                    strike_gex[K] = strike_gex.get(K, 0) - gex_b  # NEGATIVE
+                    put_gex_by_strike[K] = put_gex_by_strike.get(K, 0) + gex_b
 
         if not strike_gex:
             return None
@@ -175,33 +173,20 @@ def calculate_gex(symbol: str = "SPY") -> Optional[GEXResult]:
         put_candidates = {k: v for k, v in put_gex_by_strike.items() if k <= spot}
         put_wall = max(put_candidates, key=put_candidates.get) if put_candidates else spot * 0.98
 
-        # Zero Gamma — find sign change in GEX profile across price scenarios
+        # Zero Gamma — find sign change in GEX profile across price scenarios.
+        # Uses the chains already fetched above — zero extra network calls.
         price_range = np.linspace(spot * 0.90, spot * 1.10, 50)
         total_gex_at_price = []
 
+        scenario_rows = [
+            row for exp in expirations[:2] for row in chain_rows.get(exp, [])
+        ]
         for price_scenario in price_range:
             scenario_gex = 0.0
-            for exp in expirations[:2]:
-                exp_date = date.fromisoformat(exp)
-                T = max((exp_date - today).days / 365, 1 / 365)
-                try:
-                    chain = stock.option_chain(exp)
-                    for _, row in chain.calls.iterrows():
-                        K = float(row.get("strike", 0))
-                        oi = _safe_oi(row.get("openInterest", 0)) or _safe_oi(row.get("volume", 0))
-                        iv = float(row.get("impliedVolatility", 0.3) or 0.3)
-                        if K <= 0 or oi == 0:
-                            continue
-                        scenario_gex += _black_scholes_gamma(price_scenario, K, T, r, iv) * oi * 100 * (price_scenario ** 2) * 0.01
-                    for _, row in chain.puts.iterrows():
-                        K = float(row.get("strike", 0))
-                        oi = _safe_oi(row.get("openInterest", 0)) or _safe_oi(row.get("volume", 0))
-                        iv = float(row.get("impliedVolatility", 0.3) or 0.3)
-                        if K <= 0 or oi == 0:
-                            continue
-                        scenario_gex -= _black_scholes_gamma(price_scenario, K, T, r, iv) * oi * 100 * (price_scenario ** 2) * 0.01
-                except Exception:
-                    continue
+            for K, oi, iv, T_row, is_call in scenario_rows:
+                g = _black_scholes_gamma(price_scenario, K, T_row, r, iv) \
+                    * oi * 100 * (price_scenario ** 2) * 0.01
+                scenario_gex += g if is_call else -g
             total_gex_at_price.append(scenario_gex / 1e9)
 
         zero_gamma = spot

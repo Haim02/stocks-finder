@@ -426,6 +426,51 @@ def format_gex_realtime_hebrew(g: BarchartGEX) -> str:
     )
 
 
+def run_gex_open_report_sync() -> None:
+    """
+    APScheduler job: daily SPX GEX levels, sent right before the US open
+    (16:25 Israel). Gives the gamma map for the 0DTE trading day:
+    Call Resistance, Put Support, HVL/Gamma Flip, regime and Net GEX.
+    """
+    try:
+        g = get_realtime_gex("SPX")
+        if not g:
+            logger.warning("GEX open report: no data for SPX")
+            return
+
+        msg = (
+            "🔔 *רמות GEX ליום המסחר — לפני פתיחת וול-סטריט*\n\n"
+            + format_gex_realtime_hebrew(g)
+        )
+
+        from app.agent.telegram_bot import notify_trade
+        notify_trade(msg)
+        logger.info("GEX open report sent")
+
+        # Persist the opening levels so intraday tools can reference them
+        try:
+            from datetime import date as _date
+            from app.data.mongo_client import MongoDB
+            MongoDB.get_db()["gex_daily_levels"].update_one(
+                {"symbol": g.symbol, "trade_date": _date.today().isoformat()},
+                {"$set": {
+                    "spot_price": g.spot_price,
+                    "call_resistance": g.call_resistance,
+                    "put_support": g.put_support,
+                    "hvl": g.hvl,
+                    "net_gex": g.net_gex,
+                    "gamma_regime": g.gamma_regime,
+                    "created_at": datetime.utcnow(),
+                }},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.warning("GEX daily levels persistence failed: %s", e)
+
+    except Exception:
+        logger.exception("GEX open report failed")
+
+
 def get_gex_for_zerod(symbol: str = "SPY") -> dict:
     """
     Get GEX levels specifically for 0DTE trading.

@@ -173,41 +173,47 @@ def run_daemon() -> None:
     )
     logger.info("Daily summary scheduled: 16:45 Israel time (Mon–Fri)")
 
-    # News Alert — every 15 min during US market hours (16:00–23:00 Israel)
+    # ── GEX Open Report — 16:25 Israel, right before the US open ────────────
+    # רמות הגמא של היום (Call Resistance / Put Support / HVL) לפני הפתיחה.
     try:
-        from app.services.news_alert_engine import run_news_scan_sync
+        from app.services.barchart_gex import run_gex_open_report_sync
         scheduler.add_job(
-            run_news_scan_sync,
+            run_gex_open_report_sync,
             trigger=CronTrigger(
                 day_of_week="mon-fri",
-                hour="16-22",
-                minute="*/15",
+                hour=16,
+                minute=25,
                 timezone=SCAN_TZ,
             ),
-            id="news_alert_scan",
-            name="News Alert Scan (every 15min, 16:00–23:00 Israel)",
-            replace_existing=True,
-            misfire_grace_time=120,
-        )
-        logger.info("News alert scan scheduled: every 15min during 16:00–23:00 Israel (Mon–Fri)")
-
-        # Pre-market scan (15:30 Israel = 08:30 ET)
-        scheduler.add_job(
-            run_news_scan_sync,
-            trigger=CronTrigger(
-                day_of_week="mon-fri",
-                hour=15,
-                minute=30,
-                timezone=SCAN_TZ,
-            ),
-            id="news_alert_premarket",
-            name="News Alert Pre-Market (15:30 Israel)",
+            id="gex_open_report",
+            name="GEX Open Report — SPX (16:25 Israel, before US open)",
             replace_existing=True,
             misfire_grace_time=300,
         )
-        logger.info("News alert pre-market scan scheduled: 15:30 Israel time (Mon–Fri)")
+        logger.info("GEX open report scheduled: 16:25 Israel time (Mon–Fri)")
     except ImportError:
-        logger.warning("news_alert_engine not available — news alert jobs skipped")
+        logger.warning("barchart_gex not available — GEX open report skipped")
+
+    # ── DEX Monitor — delta support/resistance, every 30 min US session ─────
+    # מתריע רק כשנוצרת תמיכה/התנגדות Delta חדשה או שרמה קיימת מתחזקת.
+    try:
+        from app.services.dex_analyzer import run_dex_monitor_sync
+        scheduler.add_job(
+            run_dex_monitor_sync,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour="16-22",
+                minute="5,35",
+                timezone=SCAN_TZ,
+            ),
+            id="dex_monitor_30min",
+            name="DEX Support/Resistance Monitor (every 30min, US session)",
+            replace_existing=True,
+            misfire_grace_time=120,
+        )
+        logger.info("DEX monitor scheduled: every 30min, 16:05–22:35 Israel (Mon–Fri)")
+    except ImportError:
+        logger.warning("dex_analyzer not available — DEX monitor skipped")
 
     # ── Smart Alert System v2 — every 2 hours, 10:00-22:00 Israel ───────────
     try:
@@ -216,14 +222,6 @@ def run_daemon() -> None:
             run_morning_briefing_sync,
             run_evening_summary_sync,
         )
-
-        # Remove old jobs if they exist (upgrade from v1)
-        for old_job in ["live_monitor_15min", "web_crawler_30min",
-                        "news_alert_scan", "premarket_news_scan"]:
-            try:
-                scheduler.remove_job(old_job)
-            except Exception:
-                pass
 
         # Every 2 hours, Mon-Fri, 10:00-22:00 Israel time
         scheduler.add_job(

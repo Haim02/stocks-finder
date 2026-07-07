@@ -14,9 +14,10 @@ Always address me as **חיים**. Always respond in **Hebrew**. Financial terms
 ## MY PROJECT
 
 **stocks-finder** is a virtual personal Hedge Fund:
-- Python + FastAPI + MongoDB + Telegram Bot + XGBoost + Claude/OpenAI APIs
-- Already built: 15-strategy options engine, IV calculator, Finviz screener, XGBoost ML pipeline, Telegram commands
-- Being built: 3-agent autonomous system, free Telegram chat, Perplexity macro feed
+- Python + MongoDB + Telegram Bot + APScheduler + XGBoost + Claude/OpenAI APIs
+- Entry point: `python run_agent.py` (daemon: APScheduler + Telegram bot). Deployed via Docker (Railway/VPS). Active venv: `env/`.
+- Already built: 3-agent autonomous system (Regime/Strategist/Risk), 15-strategy options engine, IV calculator, GEX (Barchart + yfinance fallback), DEX delta support/resistance monitor, Finviz screener, XGBoost ML pipeline, Telegram commands, learning memory engine
+- Daily flow (Israel time): 09:00 morning briefing → 10:00 agents pipeline → 16:25 SPX GEX levels (before US open) → every 30min DEX monitor + every 5min breaking news during US session → 22:30 evening summary
 
 ---
 

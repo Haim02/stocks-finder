@@ -1,7 +1,20 @@
 import logging
+
+# Prefer the OS trust store when available — required on machines where a
+# corporate proxy / antivirus intercepts TLS with its own root certificate
+# (certifi alone fails there). Falls back to certifi (Docker/production).
+# MUST run before pymongo is imported: injecting after pymongo captures the
+# stdlib SSLContext causes infinite recursion in ssl.SSLContext.options.
+try:
+    import truststore
+    truststore.inject_into_ssl()
+    _TLS_KWARGS: dict = {}
+except ImportError:
+    import certifi
+    _TLS_KWARGS = {"tlsCAFile": certifi.where()}
+
 from datetime import datetime, timedelta
 
-import certifi
 import pytz
 from pymongo import MongoClient
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -28,10 +41,10 @@ class MongoDB:
             logger.info("Connecting to MongoDB via %s ...", source)
             cls._client = MongoClient(
                 settings.MONGO_URI,
-                tlsCAFile=certifi.where(),
                 serverSelectionTimeoutMS=10_000,
                 connectTimeoutMS=10_000,
                 maxPoolSize=10,
+                **_TLS_KWARGS,
             )
         return cls._client[settings.DB_NAME]
 

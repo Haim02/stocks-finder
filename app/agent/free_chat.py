@@ -30,8 +30,8 @@ import anthropic
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL      = "claude-sonnet-4-6"
-MAX_TOKENS        = 1500
+CLAUDE_MODEL      = "claude-sonnet-5"
+MAX_TOKENS        = 2000
 
 _ROOT       = Path(__file__).parent.parent.parent
 MEMORY_PATH = _ROOT / "MEMORY.md"
@@ -578,11 +578,13 @@ class TradingAgent:
             except Exception:
                 pass
 
-        # Relevant learned knowledge
+        # Relevant learned knowledge (incl. NotebookLM material) — ranked retrieval
         if self.memory:
             knowledge = self.memory.get_relevant_knowledge(text)
             for k in knowledge:
-                parts.append(f"[ידע שנלמד — {k.get('topic', '')}]\n{k.get('content', '')[:500]}")
+                parts.append(
+                    f"[ידע שנלמד — {k.get('topic', '')}]\n{k.get('content', '')[:1500]}"
+                )
 
         # URL detection — learn or fetch for context
         urls = re.findall(r'https?://[^\s]+', text)
@@ -689,8 +691,14 @@ class TradingAgent:
 
         if self.memory:
             self.memory.save_message("assistant", reply)
-            # Self-improvement: learn from this conversation
+            # Self-improvement: lightweight keyword learning on every message
             self.memory.learn_from_conversation(text, reply)
+            # Deep LLM insight extraction — on learning signals or every N messages.
+            # Runs in the background so the reply is never delayed.
+            if self.memory.should_deep_learn(text):
+                asyncio.get_running_loop().run_in_executor(
+                    None, self.memory.deep_learn_from_exchange, text, reply, self.client
+                )
 
         try:
             from app.services.brain_logger import log_interaction

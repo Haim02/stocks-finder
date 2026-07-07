@@ -193,7 +193,8 @@ class MemoryEngine:
 
     # ── Learned knowledge ─────────────────────────────────────────────────────
 
-    def save_knowledge(self, topic: str, content: str, source: str = ""):
+    def save_knowledge(self, topic: str, content: str, source: str = "",
+                       tags: Optional[list] = None):
         if self.knowledge_col is None:
             return
         try:
@@ -201,32 +202,70 @@ class MemoryEngine:
                 {"topic": topic},
                 {
                     "$set": {
-                        "content": content[:3000],
+                        "content": content[:12000],
                         "source": source,
+                        "tags": tags or [],
                         "updated_at": datetime.now(timezone.utc),
                     }
                 },
                 upsert=True,
             )
-            logger.info("Knowledge saved: %s", topic)
+            logger.info("Knowledge saved: %s (%d chars)", topic, len(content))
         except Exception as e:
             logger.debug("save_knowledge failed: %s", e)
 
-    def get_relevant_knowledge(self, query: str, limit: int = 3) -> list:
+    # Hebrew/English synonyms so a Hebrew question finds English knowledge
+    _QUERY_EXPANSIONS = {
+        "גמא": "gamma", "דלתא": "delta", "תמיכה": "support",
+        "התנגדות": "resistance", "תנודתיות": "volatility", "פקיעה": "expiration",
+        "אופציות": "options", "מגמה": "trend", "נזילות": "liquidity",
+        "וול": "wall", "סוחר": "dealer", "עושה שוק": "market maker",
+        "זרימת": "orderflow", "חוזים": "futures",
+    }
+
+    def _expand_query(self, query: str) -> str:
+        extra = [en for he, en in self._QUERY_EXPANSIONS.items() if he in query]
+        return query + " " + " ".join(extra)
+
+    def get_relevant_knowledge(self, query: str, limit: int = 4) -> list:
+        """
+        Keyword-ranked retrieval over BOTH topic and content.
+        Ranks by number of distinct query words matched (topic hits count double).
+        """
         if self.knowledge_col is None:
             return []
         try:
-            words = [w for w in re.split(r"\W+", query.upper()) if len(w) > 2]
+            expanded = self._expand_query(query)
+            words = list({w for w in re.split(r"\W+", expanded.upper())
+                          if len(w) > 2})[:12]
             if not words:
                 return []
-            pattern = "|".join(re.escape(w) for w in words[:6])
+
+            pattern = "|".join(re.escape(w) for w in words)
             docs = list(
                 self.knowledge_col.find(
-                    {"topic": {"$regex": pattern, "$options": "i"}},
-                    {"_id": 0, "topic": 1, "content": 1},
-                ).limit(limit)
+                    {"$or": [
+                        {"topic":   {"$regex": pattern, "$options": "i"}},
+                        {"content": {"$regex": pattern, "$options": "i"}},
+                        {"tags":    {"$regex": pattern, "$options": "i"}},
+                    ]},
+                    {"_id": 0, "topic": 1, "content": 1, "source": 1},
+                )
             )
-            return docs
+
+            def score(doc: dict) -> int:
+                topic = doc.get("topic", "").upper()
+                content = doc.get("content", "").upper()
+                s = 0
+                for w in words:
+                    if w in topic:
+                        s += 2
+                    if w in content:
+                        s += 1
+                return s
+
+            docs.sort(key=score, reverse=True)
+            return [d for d in docs[:limit] if score(d) > 0]
         except Exception as e:
             logger.debug("get_relevant_knowledge failed: %s", e)
             return []
@@ -297,6 +336,87 @@ class MemoryEngine:
         except Exception as e:
             logger.debug("learn_from_conversation failed: %s", e)
 
+    # ── Deep learning from conversation (LLM-based) ───────────────────────────
+
+    # Phrases that signal the user is teaching / correcting the agent
+    _LEARNING_SIGNALS = [
+        "תזכור", "תלמד", "זכור", "חשוב לדעת", "אני מעדיף", "אני לא אוהב",
+        "טעית", "טעות", "לא נכון", "מעכשיו", "תמיד", "אף פעם",
+        "remember", "prefer", "always", "never", "wrong", "note that",
+        "הכלל שלי", "אצלי", "בשבילי",
+    ]
+
+    _MESSAGES_PER_DEEP_LEARN = 8  # periodic extraction even without a signal
+
+    def should_deep_learn(self, user_msg: str) -> bool:
+        """Decide whether this exchange deserves an LLM insight extraction."""
+        msg = user_msg.lower()
+        if any(sig in msg for sig in self._LEARNING_SIGNALS):
+            return True
+        # Periodic: every N user messages
+        try:
+            if self.messages_col is not None:
+                count = self.messages_col.count_documents({"role": "user"})
+                return count % self._MESSAGES_PER_DEEP_LEARN == 0
+        except Exception:
+            pass
+        return False
+
+    def deep_learn_from_exchange(self, user_msg: str, agent_reply: str, client) -> None:
+        """
+        Use Claude to extract durable insights from this exchange:
+        preferences, corrections, trading rules, facts about Haim.
+        Saves them to the profile so every future system prompt includes them.
+        `client` is an anthropic.Anthropic instance (reused from the caller).
+        """
+        if self.profile_col is None or client is None:
+            return
+        try:
+            existing = self.get_profile().get("learned_insights", [])
+            existing_text = "\n".join(f"- {i}" for i in existing[-20:]) or "(none yet)"
+
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",  # cheap + fast — runs after every N messages
+                max_tokens=300,
+                system=(
+                    "You maintain the long-term memory of a personal trading agent. "
+                    "From the exchange below, extract AT MOST 2 NEW durable insights about "
+                    "the user (חיים): preferences, corrections he made, his trading rules, "
+                    "risk habits, or important facts. "
+                    "Write each insight as one short Hebrew line (financial terms in English). "
+                    "Only include insights that will still matter in a month. "
+                    "Do NOT repeat existing insights. "
+                    "If there is nothing durable to learn, reply exactly: NONE"
+                ),
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        f"Existing insights:\n{existing_text}\n\n"
+                        f"--- Exchange ---\n"
+                        f"חיים: {user_msg[:1500]}\n"
+                        f"Agent: {agent_reply[:1500]}"
+                    ),
+                }],
+            )
+            text = resp.content[0].text.strip()
+            if not text or text.upper().startswith("NONE"):
+                return
+
+            insights = [
+                line.lstrip("-•* ").strip()
+                for line in text.splitlines()
+                if len(line.strip()) > 10
+            ][:2]
+            if insights:
+                self.profile_col.update_one(
+                    {"_id": "haim"},
+                    {"$addToSet": {"learned_insights": {"$each": insights}}},
+                    upsert=True,
+                )
+                logger.info("Deep-learned %d insight(s): %s", len(insights), insights)
+        except Exception as e:
+            logger.debug("deep_learn_from_exchange failed: %s", e)
+
     def get_conversation_insights(self) -> str:
         """Generate insights about user behavior from conversation history."""
         try:
@@ -336,10 +456,20 @@ class MemoryEngine:
 
         knowledge_summary = ""
         if knowledge_list:
-            topics = [k.get("topic", "") for k in knowledge_list[:10]]
-            knowledge_summary = f"\nידע שנלמד: {', '.join(topics)}"
+            topics = [k.get("topic", "") for k in knowledge_list[:15]]
+            knowledge_summary = (
+                f"\nמאגר ידע ({len(knowledge_list)} נושאים, כולל חומרי NotebookLM): "
+                f"{', '.join(topics)}"
+            )
 
         insights_section = f"\nדפוסי שיחה: {insights}" if insights else ""
+
+        learned = profile.get("learned_insights", [])
+        if learned:
+            insights_section += (
+                "\n\nתובנות שלמדתי על חיים משיחות קודמות (חשוב — פעל לפיהן):\n"
+                + "\n".join(f"• {i}" for i in learned[-15:])
+            )
 
         return (
             "אתה HAI — סוכן מסחר AI אישי של חיים, מומחה באופציות על מניות אמריקאיות.\n"
@@ -373,7 +503,12 @@ class MemoryEngine:
             "לפני כל תשובה, המערכת שולפת אוטומטית:\n"
             "- מחירים חיים (yfinance) — מוצגים ב[Context] למטה\n"
             "- חדשות בזמן אמת (Perplexity) — מוצגים ב[Context] למטה\n"
-            "- נתוני Options Chain — מוצגים ב[Context] למטה\n\n"
+            "- נתוני Options Chain — מוצגים ב[Context] למטה\n"
+            "- ידע רלוונטי ממאגר הידע שלך (כולל ספריית NotebookLM של חיים:\n"
+            "  SpotGamma, GEX/Dealer Hedging, Delta Footprint, ATAS, Unusual Whales,\n"
+            "  CVD/IV, קורס Orderflow, 0DTE SPX) — מופיע כ-[ידע שנלמד]\n\n"
+            "כשיש [ידע שנלמד] ב-Context — התבסס עליו. זה החומר המקצועי שחיים למד\n"
+            "ורוצה שתסחור לפיו. שלב אותו עם הנתונים החיים.\n\n"
             "כל הנתונים כבר נמצאים ב-Context שלך למטה.\n"
             "אל תגיד 'אין לי גישה' — הנתונים כבר שם.\n"
             "אל תגיד 'אני מנסה לשלוף' — השליפה כבר קרתה.\n"

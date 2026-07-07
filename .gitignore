@@ -1,26 +1,22 @@
-.env
-__pycache__/
-.env/
-
-
-# python
-__pycache__/
-*.pyc
+# ── Secrets ──────────────────────────────
 .env
 .env.*
-venv/
+!.env.example
+
+# ── Python ───────────────────────────────
+__pycache__/
+*.pyc
 env/
+venv/
 .venv/
 
-# os / editor
+# ── Data / logs ──────────────────────────
+*.log
+*.db
+logs/
+removed_files_backup.zip
+
+# ── OS / editor ──────────────────────────
 .DS_Store
 .vscode/
 .idea/
-
-# logs
-*.log
-.env
-__pycache__/
-*.db
-venv/
-.vscode/

@@ -1,7 +1,3 @@
-# ── Web framework ──────────────────────────────────────────────
-fastapi
-uvicorn
-
 # ── Database ───────────────────────────────────────────────────
 pymongo
 certifi
@@ -42,6 +38,8 @@ apscheduler>=3.10
 
 # ── Utilities ──────────────────────────────────────────────────
 pytz
+tenacity
+truststore
 
-
-tenacity 
+# ── NotebookLM (knowledge base import + live queries) ──────────
+notebooklm-py
